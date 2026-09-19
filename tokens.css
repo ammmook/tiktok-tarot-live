@@ -1,0 +1,12 @@
+:root {
+ --color-bg: #10121d; --color-panel: #191c2a; --color-panel-deep: #141722; --color-raised: #222536;
+ --color-border: #2b2e40; --color-border-soft: #232637; --color-text: #f0ece8; --color-muted: #9695ab;
+ --color-faint: #6e7087; --color-purple: #baa1ee; --color-purple-light: #d1baf7; --color-purple-bg: #2e263f;
+ --color-gold: #dfbb78; --color-gold-bg: #332d29; --color-gold-border: #655138;
+ --color-green: #9cd5b7; --color-green-bg: #263c34; --color-green-ink: #182b22;
+ --color-danger: #f29b9f; --color-danger-bg: #512e38; --color-overlay: #080a13c9;
+ --color-avatar-mint: #b4d0c5; --color-avatar-rose: #dab9c4; --color-avatar-blue: #aebcd8; --color-avatar-gold: #d6c49e; --color-avatar-purple: #c4b6dd; --color-avatar-ink: #434355;
+ --font-body: "Leelawadee UI", "Tahoma", Arial, sans-serif; --font-display: var(--font-body);
+ --radius-card: 16px; --radius-control: 8px;
+}
+

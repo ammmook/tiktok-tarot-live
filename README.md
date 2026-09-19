@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tarot LIVE Queue
 
-## Getting Started
+Frontend mockup สำหรับจัดคิวดูดวงระหว่าง TikTok LIVE ใช้ Next.js 16, App Router, TypeScript และ Tailwind CSS 4
 
-First, run the development server:
+## Run
 
-```bash
+```sh
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด http://localhost:3000/live (หน้าแรกจะ redirect มาที่นี่)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```sh
+npm run lint
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## ทดลอง workflow
 
-## Learn More
+- เริ่มจาก Mint กำลังตอบ พร้อม 7 คิวรอ, 2 รายการรอคำถาม และ 1 รายการตอบแล้ว
+- เพิ่ม/แก้ไขของขวัญเป็น Love Glasses เพื่อทดสอบคิวลัด โดยไม่แทรกคนกำลังตอบ
+- เลือกเริ่มตอบคนอื่น จะพักคนเดิมไว้ในตัวกรองพักไว้
+- ตอบแล้วแสดง UNDO 9 วินาที; ถ้ามีคนใหม่กำลังตอบ UNDO จะคืนคนเดิมเข้าคิวรอ
+- รายการตอบแล้วสามารถคืนเข้าคิวได้เสมอ
+- ค้นหาชื่อ, TikTok username หรือคำถาม และใช้ตัวกรองคิวปกติ/ลัดคิว/พักไว้
+- Simulate Gift เพิ่มรายการรอคำถาม; Simulate Comment จับคู่ผู้ส่งจำลองคนล่าสุดที่ยังรอคำถาม หรือผู้รอคำถามคนแรก
+- ของขวัญจำลองสลับ Donut และ Love Glasses เพื่อทดสอบทั้งสองเส้นทาง
+- Start Mock Live เปิดสถานะและเวลาเซสชันจำลอง; ปุ่ม demo ใช้ได้โดยไม่ต้องเริ่ม LIVE
+- ลบคิวต้องยืนยัน และเปลี่ยนสถานะเป็น cancelled โดยไม่ลบ object
 
-To learn more about Next.js, take a look at the following resources:
+ข้อมูลอยู่ใน React local state รีเฟรชหน้าเพื่อเริ่มข้อมูลจำลองใหม่ ไม่มีการบันทึกถาวรหรือเชื่อมต่อ API, Google Sheets, TikTok, database, authentication หรือ backend
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## โครงสร้าง
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- app/live: route แดชบอร์ด
+- components/live: แดชบอร์ด, รายการคิว และ dialog เพิ่ม/แก้ไข/ลบ
+- components/ui: SVG icons
+- types/queue.ts: QueueEntry, GiftRule และสถานะ
+- data/mockQueue.ts: ข้อมูลจำลองเริ่มต้น
+- utils/queuePriority.ts: กฎของขวัญและการจัดลำดับ
+- services/queueService.ts: interface และ mock operations แยกจาก UI
+- tokens.css: สีและ font tokens
 
-## Deploy on Vercel
+การต่อ API ในอนาคต: เพิ่ม adapter และ asynchronous state controller รอบ QueueService โดย reuse types, priority rules และ presentation components
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Validation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+ผ่าน lint และ production build รวมถึงทดสอบใน browser: เพิ่มคิวลัด, ค้นหา, เริ่มตอบ, ตอบแล้ว/Undo, แก้ไข, ยืนยันลบ, คืนคิวพัก/คิวตอบแล้ว และ Gift/Comment pairing ตรวจ responsive ที่ 320, 375, 414, 768 และ 1440 px
