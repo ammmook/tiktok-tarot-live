@@ -39,7 +39,7 @@ async function getCredit(tx: Transaction, id: string) {
 
 async function findAvailableCredit(tx: Transaction, username: string) {
   const [credit] = await tx.select().from(questionCredits)
-    .where(and(eq(questionCredits.username, username), or(isNull(questionCredits.remainingQuestions), gt(questionCredits.remainingQuestions, 0))))
+    .where(and(eq(questionCredits.username, username), eq(questionCredits.status, "ACTIVE"), or(isNull(questionCredits.remainingQuestions), gt(questionCredits.remainingQuestions, 0))))
     .orderBy(asc(questionCredits.createdAt), asc(questionCredits.id)).limit(1);
   return credit;
 }
@@ -55,7 +55,7 @@ async function consumeCredit(tx: Transaction, credit: QuestionCreditRow) {
 
 async function countUnspentForRule(tx: Transaction, username: string, giftId: string) {
   const rows = await tx.select({ remaining: questionCredits.remainingQuestions }).from(questionCredits)
-    .where(and(eq(questionCredits.username, username), eq(questionCredits.giftId, giftId)));
+    .where(and(eq(questionCredits.username, username), eq(questionCredits.giftId, giftId), eq(questionCredits.status, "ACTIVE")));
   if (rows.some((row) => row.remaining === null)) return Number.MAX_SAFE_INTEGER;
   return rows.reduce((total, row) => total + (row.remaining ?? 0), 0);
 }

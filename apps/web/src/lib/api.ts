@@ -4,6 +4,15 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").rep
 
 type ApiResponse<T> = { data: T; replayed?: boolean };
 
+export type ListenerStatus = {
+ status: "ONLINE" | "DEGRADED" | "OFFLINE";
+ tiktokStatus: "CONNECTING" | "CONNECTED" | "OFFLINE" | "AUTHENTICATION_ERROR" | "BACKEND_UNREACHABLE" | "ENDED";
+ authenticationStatus: "configured" | "missing" | "invalid" | "expired" | "connected";
+ roomId: string | null;
+ lastEventAt: string | null;
+ updatedAt: string | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -75,6 +84,11 @@ export async function getSettings() {
 export async function updateSettings(rules: GiftRule[], settings: QueueSettings) {
   const response = await request<{ rules: GiftRule[]; settings: QueueSettings }>("/api/settings", { method: "PUT", body: JSON.stringify({ rules, settings }) });
   return response.data;
+}
+
+export async function getListenerStatus() {
+ const response = await request<ListenerStatus>("/api/listener/status");
+ return response.data;
 }
 
 export { API_URL };

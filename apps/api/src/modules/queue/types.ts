@@ -58,9 +58,12 @@ export interface QueueEntryDto {
   number: number;
   tiktokUserId: string;
   tiktokUsername: string;
+  tiktokNickname?: string;
+  profilePictureUrl?: string;
   displayName: string;
   giftName: string;
   giftIcon: string;
+  giftImageUrl?: string;
   giftPriority: number;
   question: string;
   status: QueueStatus;

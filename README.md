@@ -43,3 +43,17 @@ pnpm build
 - `packages/db`: Neon connection pool, Drizzle schema และ migrations
 
 ฐานข้อมูลเป็น source of truth; หน้าเว็บโหลด queue/history ผ่าน REST ครั้งแรกและรับ mutation/order ผ่าน Socket.IO หลัง transaction commit เท่านั้น
+
+## TikTok LIVE listener
+
+ตั้งค่า `apps/listener/.env.local` จาก `apps/listener/.env.example` แล้วรันแยกได้ด้วย:
+
+```sh
+pnpm --filter @tarot-live/listener dev
+pnpm --filter @tarot-live/listener build
+pnpm --filter @tarot-live/listener start
+```
+
+Listener รับเฉพาะ chat และ gift ผ่าน WebSocket, ปิดการประมวลผลข้อความย้อนหลัง (`processInitialData=false`) และส่ง event ที่ผ่านการ normalize ไปยัง `POST /internal/tiktok/events` ด้วย `Authorization: Bearer <LISTENER_SECRET>`. แบ็กเอนด์เป็นผู้สร้าง LIVE session, เก็บ event idempotency, จับคู่คำถาม/สิทธิ์ของขวัญแบบ FIFO และปล่อย `queue:created` หลัง commit เท่านั้น
+
+การอ่าน LIVE สาธารณะใช้ anonymous mode เป็นค่าเริ่มต้น. หากจำเป็นต้องใช้ authenticated WebSocket ต้องตั้งค่า `TIKTOK_AUTHENTICATE_WS=true`, `TIKTOK_SESSION_ID`, `TIKTOK_TT_TARGET_IDC`, `TIKTOK_SIGN_API_KEY` และยืนยันผู้ให้บริการ signing ด้วย `TIKTOK_TRUST_SIGNING_SERVICE=true`; ระบบจะไม่ส่ง credential ไปยัง signing service โดยอัตโนมัติ

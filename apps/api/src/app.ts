@@ -9,6 +9,8 @@ import { registerHealthRoute } from "./routes/health.js";
 import { registerIngestRoutes } from "./routes/ingest.js";
 import { registerQueueRoutes } from "./routes/queue.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
+import { registerTikTokRoutes } from "./routes/tiktok.js";
+import { expireTikTokPending } from "./modules/tiktok/service.js";
 import { createSocketServer } from "./socket/index.js";
 
 export async function buildApp(config: AppConfig = loadConfig()) {
@@ -26,7 +28,13 @@ export async function buildApp(config: AppConfig = loadConfig()) {
   await registerHealthRoute(app, db);
   await registerQueueRoutes(app, { db, io });
   await registerIngestRoutes(app, { db, io, config });
+  await registerTikTokRoutes(app, { db, io, config });
   await registerSettingsRoutes(app, { db, io });
+
+  const pendingExpiryTimer = setInterval(() => {
+    void expireTikTokPending(db).catch((error) => app.log.error(error, "TikTok pending-item expiry sweep failed"));
+  }, config.PENDING_EXPIRY_SWEEP_SECONDS * 1_000);
+  void expireTikTokPending(db).catch((error) => app.log.error(error, "Initial TikTok pending-item expiry sweep failed"));
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -49,6 +57,7 @@ export async function buildApp(config: AppConfig = loadConfig()) {
   });
 
   app.addHook("onClose", async () => {
+    clearInterval(pendingExpiryTimer);
     io.close();
     await closePool(pool);
   });

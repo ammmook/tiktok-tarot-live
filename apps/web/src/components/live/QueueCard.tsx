@@ -2,7 +2,7 @@
 import { useLiveQueue } from "@/store/LiveQueueProvider";
 import type { QueueEntry } from "@/types/queue";
 import Icon from "@/components/ui/Icon";
-export function Avatar({entry, large = false}: {entry: QueueEntry; large?: boolean}) { return <span className={`avatar tone-${entry.number % 5} ${large ? "large" : ""}`}>{entry.displayName.slice(0,1).toUpperCase()}<span className="avatar-spark">✧</span></span>; }
+export function Avatar({entry, large = false}: {entry: QueueEntry; large?: boolean}) { return <span className={`avatar tone-${entry.number % 5} ${large ? "large" : ""}`}>{entry.displayName.slice(0,1).toUpperCase()}{entry.profilePictureUrl && <img src={entry.profilePictureUrl} alt="" onError={event => { event.currentTarget.style.display = "none"; }} />}<span className="avatar-spark">✧</span></span>; }
 export function GiftBadge({entry}: {entry: QueueEntry}) { const {settings}=useLiveQueue(); return <span className={`gift-badge tag-${entry.ruleSnapshot.colorTag} ${entry.queueType === "express" ? "express-gift" : ""}`}><span title={entry.giftName}>{entry.giftIcon}</span>{settings.showGiftName && entry.giftName}</span>; }
 export function timeAgo(created: number, now: number) { const minutes = Math.max(0, Math.floor((now-created)/60000)); return minutes < 1 ? "เมื่อสักครู่" : `${minutes} นาทีที่แล้ว`; }
 export default function QueueCard({entry, now, onStart, onEdit, onSkip, onDelete, onRestore}: {entry: QueueEntry; now: number; onStart: () => void; onEdit: () => void; onSkip: () => void; onDelete: () => void; onRestore: () => void}) {

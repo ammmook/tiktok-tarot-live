@@ -11,7 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tarot-live/shared": "workspace:*"
+    "@tarot-live/shared": "workspace:*",
+    "dotenv": "17.2.2",
+    "tiktok-live-connector": "2.4.4"
   },
   "devDependencies": {
     "@types/node": "^20",

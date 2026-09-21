@@ -10,7 +10,7 @@ import { emitQueueMutation } from "../socket/index.js";
 
 export async function registerIngestRoutes(app: FastifyInstance, options: { db: Database; io: Server; config: AppConfig }) {
   app.post("/api/ingest/queue", async (request, reply) => {
-    assertListenerApiKey(options.config, request.headers["x-listener-key"] as string | undefined);
+    assertListenerApiKey(options.config, request.headers.authorization, request.headers["x-listener-key"] as string | undefined);
     const input = createQueueSchema.parse({ ...(request.body as Record<string, unknown>), source: "tiktok" });
     const result: QueueMutationResult = await createQueue(options.db, input);
     if (!result.replayed) emitQueueMutation(options.io, result);
@@ -18,7 +18,7 @@ export async function registerIngestRoutes(app: FastifyInstance, options: { db: 
   });
 
   app.post("/api/ingest/question", async (request, reply) => {
-    assertListenerApiKey(options.config, request.headers["x-listener-key"] as string | undefined);
+    assertListenerApiKey(options.config, request.headers.authorization, request.headers["x-listener-key"] as string | undefined);
     const input = createQuestionSchema.parse({ ...(request.body as Record<string, unknown>), source: "tiktok" });
     const result: QueueMutationResult = await createQuestion(options.db, input);
     if (!result.replayed) emitQueueMutation(options.io, result);
