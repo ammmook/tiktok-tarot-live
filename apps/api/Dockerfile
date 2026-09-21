@@ -10,6 +10,7 @@ COPY packages/shared/package.json packages/shared/package.json
 RUN pnpm install --no-frozen-lockfile
 
 COPY . .
+RUN pnpm --filter @tarot-live/db build
 RUN pnpm --filter @tarot-live/api build
 
 EXPOSE 4000

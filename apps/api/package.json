@@ -4,15 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/index.js",
+    "start": "node dist/src/server.js",
     "lint": "eslint src",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test"
   },
   "dependencies": {
+    "@fastify/cors": "^11.0.1",
+    "@fastify/helmet": "^13.0.1",
     "@tarot-live/db": "workspace:*",
-    "@tarot-live/shared": "workspace:*"
+    "@tarot-live/shared": "workspace:*",
+    "dotenv": "^17.2.2",
+    "drizzle-orm": "^0.44.7",
+    "fastify": "^5.6.1",
+    "fastify-plugin": "^5.0.1",
+    "socket.io": "^4.8.1",
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@types/node": "^20",

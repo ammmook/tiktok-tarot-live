@@ -1,4 +1,4 @@
-export type QueueStatus = "waiting" | "answering" | "answered" | "skipped" | "cancelled" | "pending_question" | "pending_approval";
+export type QueueStatus = "waiting" | "answering" | "answered" | "skipped" | "cancelled" | "deleted" | "pending_question" | "pending_approval";
 export type GiftName = string;
 export type QueueType = "normal" | "express";
 export type ColorTag = "default" | "gold" | "purple" | "orange" | "pink" | "blue";
@@ -21,7 +21,7 @@ export interface QueueSettings {
 export interface QueueEntry {
  id: string; number: number; tiktokUserId: string; tiktokUsername: string; displayName: string;
  giftName: GiftName; giftIcon: string; giftPriority: number; question: string; status: QueueStatus;
- createdAt: number; answerStartedAt?: number; answeredAt?: number;
+ createdAt: number; answerStartedAt?: number; answeredAt?: number; cancelledAt?: number; deletedAt?: number;
  giftRuleId: string; giftCount: number; queueType: QueueType; questionRights: number | null;
  ruleSnapshot: GiftRule; queueEnteredAt?: number; movedToEnd?: boolean; pendingReason?: string;
 }

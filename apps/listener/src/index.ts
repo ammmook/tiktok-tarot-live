@@ -3,6 +3,7 @@ export interface ListenerConfig {
   apiBaseUrl: string;
   sessionId?: string;
   targetIdc?: string;
+  apiKey?: string;
 }
 
 export function getListenerConfig(env: NodeJS.ProcessEnv = process.env): ListenerConfig {
@@ -11,6 +12,7 @@ export function getListenerConfig(env: NodeJS.ProcessEnv = process.env): Listene
     apiBaseUrl: env.API_BASE_URL ?? "http://localhost:4000",
     sessionId: env.TIKTOK_SESSION_ID || undefined,
     targetIdc: env.TIKTOK_TARGET_IDC || undefined,
+    apiKey: env.LISTENER_API_KEY || env.QUEUE_API_SECRET || undefined,
   };
 }
 
