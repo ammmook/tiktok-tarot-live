@@ -1,0 +1,22 @@
+{
+  "name": "@tarot-live/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./types/*": "./types/*.ts",
+    "./schemas/*": "./schemas/*.ts",
+    "./constants/*": "./constants/*.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint types schemas constants",
+    "test": "node --test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "typescript": "^5"
+  }
+}
