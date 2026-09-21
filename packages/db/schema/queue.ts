@@ -77,6 +77,36 @@ export const queueSettings = pgTable("queue_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** A gift's unspent question allowance. One gift can fund several queue entries. */
+export const questionCredits = pgTable(
+  "question_credits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: varchar("user_id", { length: 120 }),
+    username: varchar("username", { length: 120 }).notNull(),
+    displayName: varchar("display_name", { length: 120 }).notNull(),
+    giftId: varchar("gift_id", { length: 80 }).notNull(),
+    giftName: varchar("gift_name", { length: 120 }).notNull(),
+    giftIcon: varchar("gift_icon", { length: 24 }).notNull(),
+    priority: integer("priority").notNull(),
+    queueType: queueTypeEnum("queue_type").notNull(),
+    giftCount: integer("gift_count").notNull().default(1),
+    initialQuestions: integer("initial_questions"),
+    remainingQuestions: integer("remaining_questions"),
+    ruleSnapshot: jsonb("rule_snapshot").$type<Record<string, unknown>>().notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 180 }).notNull(),
+    externalEventId: varchar("external_event_id", { length: 180 }),
+    source: varchar("source", { length: 32 }).notNull().default("dashboard"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    idempotencyUnique: uniqueIndex("question_credits_idempotency_uidx").on(table.idempotencyKey),
+    externalEventUnique: uniqueIndex("question_credits_external_event_uidx").on(table.externalEventId),
+    usernameRemainingIndex: index("question_credits_username_remaining_idx").on(table.username, table.remainingQuestions, table.createdAt),
+  }),
+);
+
 export const queueEntries = pgTable(
   "queue_entries",
   {
@@ -93,6 +123,7 @@ export const queueEntries = pgTable(
     queueType: queueTypeEnum("queue_type").notNull(),
     giftCount: integer("gift_count").notNull().default(1),
     questionRights: integer("question_rights"),
+    creditId: uuid("credit_id").references(() => questionCredits.id),
     ruleSnapshot: jsonb("rule_snapshot").$type<Record<string, unknown>>().notNull(),
     status: queueStatusEnum("status").notNull().default("WAITING"),
     pendingReason: varchar("pending_reason", { length: 240 }),
@@ -117,6 +148,7 @@ export const queueEntries = pgTable(
     orderingIndex: index("queue_entries_ordering_idx").on(table.status, table.priority, table.createdAt),
     priorityCreatedIndex: index("queue_entries_priority_created_idx").on(table.priority, table.createdAt),
     usernameStatusIndex: index("queue_entries_username_status_idx").on(table.username, table.status),
+    creditIndex: index("queue_entries_credit_idx").on(table.creditId, table.createdAt),
   }),
 );
 

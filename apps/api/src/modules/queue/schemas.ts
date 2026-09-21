@@ -27,6 +27,17 @@ export const updateQueueSchema = z.object({
   allowDuplicate: z.boolean().default(false),
 });
 
+export const createQuestionSchema = z.object({
+  displayName: z.string().trim().min(1).max(120),
+  tiktokUsername: z.string().trim().min(1).max(120),
+  tiktokUserId: z.string().trim().max(120).optional(),
+  question: z.string().trim().min(1).max(2000),
+  idempotencyKey: z.string().trim().min(8).max(180),
+  externalEventId: z.string().trim().max(180).optional(),
+  source: z.string().trim().max(32).default("dashboard"),
+  allowDuplicate: z.boolean().default(false),
+});
+
 export const idSchema = z.object({ id: z.string().uuid() });
 export const historyQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) });
 
@@ -77,4 +88,5 @@ export const settingsSchema = z.object({
 
 export type CreateQueueInput = z.infer<typeof createQueueSchema>;
 export type UpdateQueueInput = z.infer<typeof updateQueueSchema>;
+export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;

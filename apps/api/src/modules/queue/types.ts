@@ -1,5 +1,5 @@
 import type { InferSelectModel } from "drizzle-orm";
-import type { queueEntries } from "@tarot-live/db/schema";
+import type { questionCredits, queueEntries } from "@tarot-live/db/schema";
 
 export type QueueStatus =
   | "waiting"
@@ -80,6 +80,7 @@ export interface QueueEntryDto {
 }
 
 export type QueueRow = InferSelectModel<typeof queueEntries>;
+export type QuestionCreditRow = InferSelectModel<typeof questionCredits>;
 
 export interface QueueMutationResult {
   entry: QueueEntryDto;

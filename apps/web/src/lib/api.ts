@@ -7,7 +7,7 @@ type ApiResponse<T> = { data: T; replayed?: boolean };
 async function request<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...(init?.headers ?? {}) },
     cache: "no-store",
   });
   const body = await response.json().catch(() => ({})) as { data?: T; replayed?: boolean; error?: { message?: string } };
@@ -16,6 +16,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiResponse
 }
 
 export type QueueCreateInput = QueueInput & {
+  idempotencyKey: string;
+  allowDuplicate?: boolean;
+  tiktokUserId?: string;
+  source?: string;
+};
+
+export type QueueQuestionInput = Pick<QueueInput, "displayName" | "tiktokUsername" | "question"> & {
   idempotencyKey: string;
   allowDuplicate?: boolean;
   tiktokUserId?: string;
@@ -34,6 +41,10 @@ export async function getHistory(limit = 200) {
 
 export async function createQueue(input: QueueCreateInput) {
   return request<QueueEntry>("/api/queue", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function createQuestion(input: QueueQuestionInput) {
+  return request<QueueEntry>("/api/queue/questions", { method: "POST", body: JSON.stringify(input) });
 }
 
 export async function updateQueue(id: string, input: Partial<QueueInput> & { status?: QueueEntry["status"]; allowDuplicate?: boolean }) {

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Database } from "@tarot-live/db";
-import { giftRules, queueEntries, queueEvents, queueSettings } from "@tarot-live/db/schema";
+import { giftRules, questionCredits, queueEntries, queueEvents, queueSettings } from "@tarot-live/db/schema";
 import { toGiftRuleDto, toQueueEntryDto, toQueueSettingsDto } from "./mapping.js";
 import type { QueueEntryDto, QueueRow, QueueSettingsDto, GiftRuleDto } from "./types.js";
 
@@ -85,4 +85,4 @@ export function toDto(row: QueueRow) {
   return toQueueEntryDto(row);
 }
 
-export { giftRules, queueEntries, queueEvents, queueSettings, isNull };
+export { giftRules, questionCredits, queueEntries, queueEvents, queueSettings, isNull };

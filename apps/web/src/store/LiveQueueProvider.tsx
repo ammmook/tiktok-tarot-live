@@ -14,6 +14,7 @@ interface Store {
  rules: GiftRule[]; settings: QueueSettings; entries: QueueEntry[]; now: number; ready: boolean; error: string;
  setEntries: Dispatch<SetStateAction<QueueEntry[]>>;
  commitSettings: (rules: GiftRule[], settings: QueueSettings) => Promise<void>;
+ runAction: <T>(label: string, action: () => Promise<T>) => Promise<T>;
  reload: () => Promise<void>;
  live: boolean; setLive: Dispatch<SetStateAction<boolean>>;
  liveStarted: number; setLiveStarted: Dispatch<SetStateAction<number>>;
@@ -39,6 +40,8 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const [error,setError] = useState("");
  const [live,setLive] = useState(false);
  const [liveStarted,setLiveStarted] = useState(0);
+ const [pendingActions,setPendingActions] = useState<{id:number;label:string}[]>([]);
+ const actionId = useRef(0);
  const seenCreationEvents = useRef(new Set<string>());
  const seenCreationEntries = useRef(new Set<string>());
  const readyRef = useRef(false);
@@ -46,6 +49,13 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const reload = async () => {
   const [snapshot,active,history] = await Promise.all([getSettings(),getQueue(),getHistory()]);
   setRules(snapshot.rules); setSettings(snapshot.settings); setEntries(mergeEntries([], [...active,...history])); setError(""); setReady(true); readyRef.current=true;
+ };
+
+ const runAction = async <T,>(label: string, action: () => Promise<T>) => {
+  const id = ++actionId.current;
+  setPendingActions(current => [...current, {id,label}]);
+  try { return await action(); }
+  finally { setPendingActions(current => current.filter(item => item.id !== id)); }
  };
 
  useEffect(() => {
@@ -71,10 +81,11 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   return ()=>{window.clearInterval(interval);window.clearTimeout(initialLoad);window.removeEventListener("pointerdown",unlock);window.removeEventListener("keydown",unlock);socket.removeAllListeners();socket.close();};
  },[]);
 
- const commitSettings = async (nextRules:GiftRule[],nextSettings:QueueSettings) => {
+ const commitSettings = async (nextRules:GiftRule[],nextSettings:QueueSettings) => runAction("กำลังบันทึกการตั้งค่า", async () => {
   const snapshot=await updateSettings(nextRules.map(rule=>({...rule,isExpress:rule.queueType==="express"})),nextSettings);
   setRules(snapshot.rules); setSettings(snapshot.settings); await reload();
- };
- return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,reload,live,setLive,liveStarted,setLiveStarted}}>{children}</Context.Provider>;
+ });
+ const activeAction = pendingActions[pendingActions.length - 1];
+ return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,runAction,reload,live,setLive,liveStarted,setLiveStarted}}>{children}{activeAction&&<div className="action-status" role="status" aria-live="polite"><span className="action-status-mark">✦</span><span>{activeAction.label}</span><span className="action-status-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>}</Context.Provider>;
 }
 export function useLiveQueue(){const store=useContext(Context);if(!store)throw new Error("LiveQueueProvider is required");return store;}
