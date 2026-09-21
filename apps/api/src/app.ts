@@ -40,7 +40,12 @@ export async function buildApp(config: AppConfig = loadConfig()) {
       return reply.code(409).send({ error: { code: "CONFLICT", message: "The queue mutation conflicts with an existing record" } });
     }
     request.log.error(error);
-    return reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
+    return reply.code(500).send({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: config.NODE_ENV === "production" ? "Internal server error" : error instanceof Error ? error.message : "Internal server error",
+      },
+    });
   });
 
   app.addHook("onClose", async () => {
