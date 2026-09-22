@@ -119,8 +119,21 @@ function identity(input: CreateQueueInput | CreateQuestionInput, username: strin
     idempotencyKey: input.idempotencyKey,
     externalEventId: input.externalEventId,
     source: input.source,
-    dedupeKey: question ? makeDedupeKey(username, "question", question) : null,
+    dedupeKey: dedupeKeyFor(input, username, question),
   };
+}
+
+function dedupeKeyFor(input: Pick<CreateQueueInput, "allowDuplicate">, username: string, question: string) {
+  return input.allowDuplicate || !question ? null : makeDedupeKey(username, "question", question);
+}
+
+async function assertDedupeAvailable(tx: Transaction, dedupeKey: string | null, excludeId?: string) {
+  if (!dedupeKey) return;
+  const condition = excludeId
+    ? and(eq(queueEntries.dedupeKey, dedupeKey), inArray(queueEntries.status, activeStatuses), sql`${queueEntries.id} <> ${excludeId}`)
+    : and(eq(queueEntries.dedupeKey, dedupeKey), inArray(queueEntries.status, activeStatuses));
+  const [duplicate] = await tx.select({ id: queueEntries.id }).from(queueEntries).where(condition).limit(1);
+  if (duplicate) throw conflict("An active queue already exists for this user and question");
 }
 
 async function createPaidEntry(tx: Transaction, input: Identity, credit: QuestionCreditRow, settings: QueueSettingsDto) {
@@ -216,7 +229,7 @@ async function fillGiftPlaceholder(
   row: QueueRow,
   question: string,
   settings: QueueSettingsDto,
-  event?: Pick<CreateQuestionInput, "idempotencyKey" | "externalEventId">,
+  event?: { idempotencyKey?: string; externalEventId?: string; allowDuplicate?: boolean },
 ) {
   if (!row.creditId) throw conflict("This pending queue does not have a gift credit");
   const credit = await getCredit(tx, row.creditId);
@@ -224,12 +237,14 @@ async function fillGiftPlaceholder(
   const consumed = await consumeCredit(tx, credit);
   const placement = await resolvePlacement(tx, settings);
   const now = new Date();
+  const dedupeKey = dedupeKeyFor({ allowDuplicate: event?.allowDuplicate ?? false }, row.username, question);
+  await assertDedupeAvailable(tx, dedupeKey, row.id);
   const [updated] = await tx.update(queueEntries).set({
     question,
     questionRights: consumed.remainingQuestions,
     status: placement.status,
     pendingReason: placement.pendingReason,
-    dedupeKey: makeDedupeKey(row.username, "question", question),
+    dedupeKey,
     idempotencyKey: event?.idempotencyKey ?? row.idempotencyKey,
     externalEventId: event?.externalEventId ?? row.externalEventId,
     queueEnteredAt: placement.status === "WAITING" ? now : null,
@@ -296,13 +311,7 @@ export async function createQueue(db: Database, input: CreateQueueInput, account
       await lockUser(tx, username);
       const replayAfterLock = await queueReplay(tx, input.idempotencyKey, input.externalEventId) ?? await creditReplay(tx, input.idempotencyKey, input.externalEventId);
       if (replayAfterLock) return { ...(await mutation(tx, replayAfterLock, [], "queue:created")), replayed: true };
-      if (question && !input.allowDuplicate) {
-        const [duplicate] = await tx.select().from(queueEntries).where(and(
-          eq(queueEntries.dedupeKey, makeDedupeKey(username, "question", question)),
-          inArray(queueEntries.status, activeStatuses),
-        )).limit(1);
-        if (duplicate) throw conflict("An active queue already exists for this user and question");
-      }
+      await assertDedupeAvailable(tx, dedupeKeyFor(input, username, question));
       const granted = rule.unlimitedQuestions ? null : calculateRights(rule, input.giftCount, await countUnspentForRule(tx, username, rule.id));
       if (granted === 0) throw conflict("This user has no remaining question rights");
 
@@ -379,11 +388,7 @@ export async function createQuestion(db: Database, input: CreateQuestionInput, a
       await lockUser(tx, username);
       const replayAfterLock = await queueReplay(tx, input.idempotencyKey, input.externalEventId);
       if (replayAfterLock) return { ...(await mutation(tx, replayAfterLock, [], "queue:created")), replayed: true };
-      const dedupeKey = makeDedupeKey(username, "question", question);
-      if (!input.allowDuplicate) {
-        const [duplicate] = await tx.select().from(queueEntries).where(and(eq(queueEntries.dedupeKey, dedupeKey), inArray(queueEntries.status, activeStatuses))).limit(1);
-        if (duplicate) throw conflict("An active queue already exists for this user and question");
-      }
+      await assertDedupeAvailable(tx, dedupeKeyFor(input, username, question));
 
       const placeholders = await tx.select().from(queueEntries).where(and(
         eq(queueEntries.username, username), eq(queueEntries.status, "PENDING_QUESTION"), eq(queueEntries.question, ""),
@@ -391,7 +396,7 @@ export async function createQuestion(db: Database, input: CreateQuestionInput, a
       for (const row of placeholders) {
         if (!row.creditId) continue;
         const credit = await getCredit(tx, row.creditId);
-        if (hasCredit(credit)) return mutation(tx, await fillGiftPlaceholder(tx, row, question, settings, input), [], "queue:updated");
+      if (hasCredit(credit)) return mutation(tx, await fillGiftPlaceholder(tx, row, question, settings, input), [], "queue:updated");
       }
 
       const available = await findAvailableCredit(tx, username);
@@ -422,16 +427,24 @@ export async function updateQueue(db: Database, id: string, input: UpdateQueueIn
     assertQuestionLength(question, settings);
     await lockUser(tx, row.username);
     if (row.status === "PENDING_QUESTION" && !row.question && question) {
-      return mutation(tx, await fillGiftPlaceholder(tx, row, question, settings), [], "queue:updated");
+      return mutation(tx, await fillGiftPlaceholder(tx, row, question, settings, input), [], "queue:updated");
     }
     if (input.status && input.status !== "waiting" && input.status !== "skipped") throw invalidTransition("Only waiting or skipped status can be set by update");
     const status = input.status === "waiting" ? "WAITING" : input.status === "skipped" ? "SKIPPED" : row.status;
+    const dedupeKey = input.allowDuplicate
+      ? null
+      : !question
+        ? null
+        : question === row.question && row.dedupeKey === null
+          ? null
+          : makeDedupeKey(row.username, "question", question);
+    if (dedupeKey !== row.dedupeKey) await assertDedupeAvailable(tx, dedupeKey, row.id);
     const [updated] = await tx.update(queueEntries).set({
       displayName: input.displayName?.trim() ?? row.displayName,
       question,
       status,
       pendingReason: status === "WAITING" && row.pendingReason === "max_active_queues" ? null : row.pendingReason,
-      dedupeKey: question ? makeDedupeKey(row.username, "question", question) : row.dedupeKey,
+      dedupeKey,
       queueEnteredAt: status === "WAITING" || status === "SKIPPED" ? (row.queueEnteredAt ?? new Date()) : row.queueEnteredAt,
       movedToEnd: status === "SKIPPED" ? true : row.movedToEnd,
       restoreNext: status === "SKIPPED" ? false : row.restoreNext,

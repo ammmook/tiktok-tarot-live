@@ -7,7 +7,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerTikTokRoutes } from "../src/routes/tiktok.ts";
 import { processTikTokEvent, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
-import { createQueue, startQueue, completeQueue, restoreQueue, getSettingsSnapshot, updateSettings } from "../src/modules/queue/service.ts";
+import { createQueue, startQueue, completeQueue, restoreQueue, updateQueue, getSettingsSnapshot, updateSettings } from "../src/modules/queue/service.ts";
 import { listActive } from "../src/modules/queue/repository.ts";
 import { AppError } from "../src/errors/app-error.ts";
 
@@ -124,6 +124,27 @@ test("restoring a queue inserts it directly after the current answer", async () 
  const order = restored.queueOrder;
  assert.ok(order.indexOf(current.entry.id) < order.indexOf(closed.entry.id));
  assert.ok(order.indexOf(closed.entry.id) < order.indexOf(existing.entry.id));
+});
+
+test("duplicate overrides avoid unique-key crashes while regular edits return a conflict", async () => {
+ const suffix = `${Date.now()}-${Math.random()}`;
+ const input = (question, idempotencyKey, allowDuplicate = false) => ({
+  displayName: "Duplicate Test", tiktokUsername: `@duplicate-${suffix}`, question, giftRuleId: "test-rose", giftCount: 1, idempotencyKey, allowDuplicate,
+ });
+ const first = await createQueue(db, input("same question", `duplicate-first-${suffix}`));
+ const duplicate = await createQueue(db, input("same question", `duplicate-allowed-${suffix}`, true));
+ assert.notEqual(first.entry.id, duplicate.entry.id);
+
+ const other = await createQueue(db, input("other question", `duplicate-other-${suffix}`));
+ await assert.rejects(
+  () => updateQueue(db, first.entry.id, { question: "other question", allowDuplicate: false }),
+  error => error instanceof AppError && error.statusCode === 409,
+ );
+ const updated = await updateQueue(db, first.entry.id, { question: "other question", allowDuplicate: true });
+ assert.equal(updated.entry.question, "other question");
+ const renamed = await updateQueue(db, updated.entry.id, { displayName: "Duplicate Test Renamed", allowDuplicate: false });
+ assert.equal(renamed.entry.displayName, "Duplicate Test Renamed");
+ assert.equal(other.entry.question, "other question");
 });
 
 test("gift rules and queue settings are isolated by TikTok account", async () => {
