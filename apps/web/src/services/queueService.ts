@@ -31,7 +31,8 @@ export function addWithProtection(entries: QueueEntry[], entry: QueueEntry, sett
 }
 export function restoreQueueEntry(entries: QueueEntry[], snapshot: QueueEntry, rules: GiftRule[], settings: QueueSettings, now: number) {
  const others = entries.filter(e=>e.id!==snapshot.id);
- let restored: QueueEntry = {...snapshot,answeredAt:undefined};
+ let restored: QueueEntry = {...snapshot,status:"waiting",answeredAt:undefined,cancelledAt:undefined,deletedAt:undefined,
+  queueEnteredAt:now,movedToEnd:false,restoreNext:true};
  if(snapshot.status === "answering" && !others.some(e=>e.status === "answering")) {
   const admitted = admission(restored,others,settings,true);
   restored = admitted.status === "waiting" ? {...admitted,status:"answering",answerStartedAt:now} : admitted;

@@ -7,13 +7,13 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerTikTokRoutes } from "../src/routes/tiktok.ts";
 import { processTikTokEvent, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
-import { startQueue, completeQueue } from "../src/modules/queue/service.ts";
+import { createQueue, startQueue, completeQueue, restoreQueue } from "../src/modules/queue/service.ts";
 import { AppError } from "../src/errors/app-error.ts";
 
 let client, db;
 before(async () => {
  client = new PGlite();
- for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql"]) {
+ for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql"]) {
   const sql = await readFile(new URL(`../../../packages/db/migrations/${name}`, import.meta.url), "utf8");
   // PGlite provides gen_random_uuid natively; pgcrypto is not bundled.
   await client.exec(sql.replace("CREATE EXTENSION IF NOT EXISTS pgcrypto;", ""));
@@ -104,4 +104,20 @@ test("dashboard control validates usernames, requires a live worker and isolates
  assert.notEqual(switched.revision, connected.revision);
  assert.equal((await post("/api/tiktok/disconnect")).json().data.username, null);
  await app.close();
+});
+
+test("restoring a queue inserts it directly after the current answer", async () => {
+ const make = (name) => createQueue(db, { displayName: name, tiktokUsername: `@${name.toLowerCase()}`, question: `${name} question`, giftRuleId: "test-rose", giftCount: 1, idempotencyKey: `restore-${name.toLowerCase()}-${Date.now()}-${Math.random()}` });
+ const closed = await make("ClosedRestore");
+ await startQueue(db, closed.entry.id);
+ await completeQueue(db, closed.entry.id);
+ const current = await make("CurrentAnswer");
+ await startQueue(db, current.entry.id);
+ const existing = await make("ExistingWait");
+ const restored = await restoreQueue(db, closed.entry.id);
+ assert.equal(restored.entry.status, "waiting");
+ assert.equal(restored.entry.restoreNext, true);
+ const order = restored.queueOrder;
+ assert.ok(order.indexOf(current.entry.id) < order.indexOf(closed.entry.id));
+ assert.ok(order.indexOf(closed.entry.id) < order.indexOf(existing.entry.id));
 });

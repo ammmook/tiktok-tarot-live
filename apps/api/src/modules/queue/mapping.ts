@@ -67,6 +67,7 @@ export function toQueueEntryDto(row: QueueRow): QueueEntryDto {
     ruleSnapshot: toGiftRuleDto(row.ruleSnapshot),
     queueEnteredAt: row.queueEnteredAt?.getTime(),
     movedToEnd: row.movedToEnd,
+    restoreNext: row.restoreNext,
     pendingReason: row.pendingReason ?? undefined,
   };
 }

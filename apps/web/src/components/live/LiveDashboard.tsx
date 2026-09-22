@@ -12,7 +12,7 @@ import TikTokPendingCard from "./TikTokPendingCard";
 import { useLiveQueue } from "@/store/LiveQueueProvider";
 type ToastState = { message: string; undo?: QueueEntry; token: number };
 export default function LiveDashboard() {
- const {entries,setEntries,now,rules,settings,runAction,connection,tiktokPending,error} = useLiveQueue();
+ const {entries,setEntries,now,rules,settings,runAction,reload,connection,tiktokPending,error} = useLiveQueue();
  const live = connection?.tiktokStatus === "CONNECTED";
  const [tab, setTab] = useState("queue");
  const [filter, setFilter] = useState("all");
@@ -41,7 +41,7 @@ export default function LiveDashboard() {
  const applyEntry = (entry:QueueEntry) => setEntries(current => current.some(item=>item.id===entry.id) ? current.map(item=>item.id===entry.id?entry:item) : [entry,...current]);
  const change = async (entry: QueueEntry, status: QueueStatus) => {
   const actionLabel = status === "answering" ? "กำลังเริ่มตอบคำถาม" : status === "answered" ? "กำลังบันทึกว่าตอบแล้ว" : status === "skipped" ? "กำลังพักคิว" : status === "cancelled" ? "กำลังยกเลิกคิว" : "กำลังคืนคิว";
-  try { const updated = await runAction(actionLabel, () => status === "answering" ? startQueue(entry.id) : status === "answered" ? completeQueue(entry.id) : status === "skipped" ? skipQueue(entry.id) : status === "cancelled" ? cancelQueue(entry.id) : restoreQueue(entry.id)); applyEntry(updated);
+  try { const updated = await runAction(actionLabel, () => status === "answering" ? startQueue(entry.id) : status === "answered" ? completeQueue(entry.id) : status === "skipped" ? skipQueue(entry.id) : status === "cancelled" ? cancelQueue(entry.id) : restoreQueue(entry.id)); applyEntry(updated); if(status === "waiting") await reload().catch(() => undefined);
    if(status==="answered") notify(`ตอบคำถามของ ${entry.displayName} แล้ว`,entry);
    else if(status==="answering") notify(`เริ่มตอบ ${entry.displayName}`);
    else notify(updated.pendingReason || (status==="skipped"?`พักคิวของ ${entry.displayName} แล้ว`:`คืนคิวของ ${entry.displayName} แล้ว`));

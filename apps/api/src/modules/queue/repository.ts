@@ -10,11 +10,13 @@ export const terminalStatuses = ["ANSWERED", "CANCELLED", "DELETED"] as const;
 export function queueOrder() {
   return sql`CASE
     WHEN ${queueEntries.status} = 'ANSWERING' THEN 0
-    WHEN ${queueEntries.status} = 'WAITING' AND ${queueEntries.queueType} = 'EXPRESS' THEN 1
-    WHEN ${queueEntries.status} = 'WAITING' THEN 2
-    WHEN ${queueEntries.status} = 'SKIPPED' THEN 3
-    ELSE 4
-  END, ${queueEntries.priority} ASC, COALESCE(${queueEntries.queueEnteredAt}, ${queueEntries.createdAt}) ASC, ${queueEntries.queueNumber} ASC`;
+    WHEN ${queueEntries.status} = 'WAITING' AND ${queueEntries.restoreNext} = true THEN 1
+    WHEN ${queueEntries.status} = 'WAITING' AND ${queueEntries.queueType} = 'EXPRESS' THEN 2
+    WHEN ${queueEntries.status} = 'WAITING' THEN 3
+    WHEN ${queueEntries.status} = 'SKIPPED' THEN 4
+    ELSE 5
+  END, CASE WHEN ${queueEntries.status} = 'WAITING' AND ${queueEntries.restoreNext} = true THEN 0 ELSE ${queueEntries.priority} END ASC,
+  COALESCE(${queueEntries.queueEnteredAt}, ${queueEntries.createdAt}) ASC, ${queueEntries.queueNumber} ASC`;
 }
 
 export async function findQueueEntry(db: Database, id: string) {

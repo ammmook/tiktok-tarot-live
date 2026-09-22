@@ -435,6 +435,7 @@ export async function updateQueue(db: Database, id: string, input: UpdateQueueIn
       dedupeKey: question ? makeDedupeKey(row.username, "question", question) : row.dedupeKey,
       queueEnteredAt: status === "WAITING" || status === "SKIPPED" ? (row.queueEnteredAt ?? new Date()) : row.queueEnteredAt,
       movedToEnd: status === "SKIPPED" ? true : row.movedToEnd,
+      restoreNext: status === "SKIPPED" ? false : row.restoreNext,
       updatedAt: new Date(),
     }).where(eq(queueEntries.id, id)).returning();
     await recordEvent(tx as unknown as Database, id, row.status === updated.status ? "updated" : "status_changed", row.status, updated.status);
@@ -455,25 +456,25 @@ async function transition(db: Database, id: string, target: QueueRow["status"], 
     if (target === "ANSWERING") {
       const [current] = await tx.select().from(queueEntries).where(eq(queueEntries.status, "ANSWERING")).limit(1);
       if (current && current.id !== row.id) {
-        const [skipped] = await tx.update(queueEntries).set({ status: "SKIPPED", updatedAt: now }).where(eq(queueEntries.id, current.id)).returning();
+        const [skipped] = await tx.update(queueEntries).set({ status: "SKIPPED", restoreNext: false, updatedAt: now }).where(eq(queueEntries.id, current.id)).returning();
         related.push(skipped);
         await recordEvent(tx as unknown as Database, skipped.id, "auto_skipped", "ANSWERING", "SKIPPED");
       }
     }
     const values = target === "ANSWERING"
-      ? { status: target, startedAt: now, queueEnteredAt: row.queueEnteredAt ?? now, updatedAt: now }
+      ? { status: target, startedAt: now, queueEnteredAt: row.queueEnteredAt ?? now, restoreNext: false, updatedAt: now }
       : target === "ANSWERED"
-        ? { status: target, answeredAt: now, dedupeKey: null, updatedAt: now }
+        ? { status: target, answeredAt: now, dedupeKey: null, restoreNext: false, updatedAt: now }
         : target === "CANCELLED"
-          ? { status: target, cancelledAt: now, dedupeKey: null, updatedAt: now }
-          : { status: target, deletedAt: now, dedupeKey: null, updatedAt: now };
+          ? { status: target, cancelledAt: now, dedupeKey: null, restoreNext: false, updatedAt: now }
+          : { status: target, deletedAt: now, dedupeKey: null, restoreNext: false, updatedAt: now };
     const [updated] = await tx.update(queueEntries).set(values).where(eq(queueEntries.id, id)).returning();
     await recordEvent(tx as unknown as Database, id, (eventType ?? "queue:updated").replace("queue:", ""), row.status, target);
     const settings = await getSettings(tx as unknown as Database);
     if (target === "ANSWERED" && settings.autoAdvance) {
-      const [next] = await tx.select().from(queueEntries).where(eq(queueEntries.status, "WAITING")).orderBy(asc(queueEntries.priority), asc(queueEntries.queueEnteredAt), asc(queueEntries.queueNumber)).limit(1);
+      const [next] = await tx.select().from(queueEntries).where(eq(queueEntries.status, "WAITING")).orderBy(queueOrder()).limit(1);
       if (next) {
-        const [started] = await tx.update(queueEntries).set({ status: "ANSWERING", startedAt: now, updatedAt: now }).where(eq(queueEntries.id, next.id)).returning();
+        const [started] = await tx.update(queueEntries).set({ status: "ANSWERING", startedAt: now, restoreNext: false, updatedAt: now }).where(eq(queueEntries.id, next.id)).returning();
         related.push(started);
         await recordEvent(tx as unknown as Database, started.id, "auto_advanced", "WAITING", "ANSWERING");
       }
@@ -492,7 +493,7 @@ export async function skipQueue(db: Database, id: string) {
     await lockQueue(tx);
     const row = await load(tx, id);
     if (!["WAITING", "ANSWERING"].includes(row.status)) throw invalidTransition("Only active queues can be skipped");
-    const [updated] = await tx.update(queueEntries).set({ status: "SKIPPED", movedToEnd: true, queueEnteredAt: new Date(), updatedAt: new Date() }).where(eq(queueEntries.id, id)).returning();
+    const [updated] = await tx.update(queueEntries).set({ status: "SKIPPED", movedToEnd: true, restoreNext: false, queueEnteredAt: new Date(), updatedAt: new Date() }).where(eq(queueEntries.id, id)).returning();
     await recordEvent(tx as unknown as Database, id, "skipped", row.status, "SKIPPED");
     return mutation(tx, updated, [], "queue:updated");
   });
@@ -502,11 +503,11 @@ export async function restoreQueue(db: Database, id: string) {
   return db.transaction(async (tx) => {
     await lockQueue(tx);
     const row = await load(tx, id);
-    if (!["ANSWERED", "CANCELLED", "DELETED"].includes(row.status)) throw invalidTransition("Only closed queues can be restored");
+    if (!["ANSWERED", "CANCELLED", "DELETED", "SKIPPED"].includes(row.status)) throw invalidTransition("Only closed or skipped queues can be restored");
     const [updated] = await tx.update(queueEntries).set({
       status: "WAITING", answeredAt: null, cancelledAt: null, deletedAt: null,
       dedupeKey: makeDedupeKey(row.username, "question", row.question),
-      queueEnteredAt: new Date(), updatedAt: new Date(),
+      queueEnteredAt: new Date(), movedToEnd: false, restoreNext: true, pendingReason: null, updatedAt: new Date(),
     }).where(eq(queueEntries.id, id)).returning();
     await recordEvent(tx as unknown as Database, id, "restored", row.status, "WAITING");
     return mutation(tx, updated, [], "queue:updated");

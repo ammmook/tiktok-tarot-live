@@ -24,7 +24,7 @@ export interface QueueEntry {
  giftName: GiftName; giftIcon: string; giftImageUrl?: string; giftPriority: number; question: string; status: QueueStatus;
  createdAt: number; answerStartedAt?: number; answeredAt?: number; cancelledAt?: number; deletedAt?: number;
  giftRuleId: string; giftCount: number; queueType: QueueType; questionRights: number | null;
- ruleSnapshot: GiftRule; queueEnteredAt?: number; movedToEnd?: boolean; pendingReason?: string;
+ ruleSnapshot: GiftRule; queueEnteredAt?: number; movedToEnd?: boolean; restoreNext?: boolean; pendingReason?: string;
 }
 export type QueueInput = Pick<QueueEntry, "tiktokUsername" | "displayName" | "question" | "giftRuleId" | "giftCount">;
 

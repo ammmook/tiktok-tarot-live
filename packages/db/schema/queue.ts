@@ -241,6 +241,7 @@ export const queueEntries = pgTable(
     source: varchar("source", { length: 32 }).notNull().default("dashboard"),
     queueEnteredAt: timestamp("queue_entered_at", { withTimezone: true }),
     movedToEnd: boolean("moved_to_end").notNull().default(false),
+    restoreNext: boolean("restore_next").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     answeredAt: timestamp("answered_at", { withTimezone: true }),

@@ -114,6 +114,12 @@ test("undo after auto advance keeps the new current; undo never bypasses active 
  const limited=restoreQueueEntry(advanced,snapshot,rules,{...settings,maxActiveQueues:1},1000002);
  assert.equal(limited.find(e=>e.id===snapshot.id).status,"pending_approval");
 });
+test("restored queue is first among waiting entries",()=>{
+ const rules=defaultGiftRules(),settings=defaultQueueSettings(),entries=queueService.load(1000000,rules);
+ const restored={...entries.find(e=>e.status==="answered"),status:"waiting",restoreNext:true,queueEnteredAt:1000002,movedToEnd:false};
+ const existing=entries.find(e=>e.status==="waiting");
+ assert.equal(waitingQueue([existing,restored],rules,settings)[0].id,restored.id);
+});
 test("saving require-question changes reclassifies empty queues and preserves allocated rights on unrelated saves",()=>{
  const rules=defaultGiftRules(),settings=defaultQueueSettings(),entries=queueService.load(1000000,rules);
  const changed=rules.map(r=>({...r,requireQuestion:false}));

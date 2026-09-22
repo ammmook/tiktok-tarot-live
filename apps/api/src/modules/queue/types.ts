@@ -79,6 +79,7 @@ export interface QueueEntryDto {
   ruleSnapshot: GiftRuleDto;
   queueEnteredAt?: number;
   movedToEnd?: boolean;
+  restoreNext?: boolean;
   pendingReason?: string;
 }
 
