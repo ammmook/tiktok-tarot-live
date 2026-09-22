@@ -12,9 +12,8 @@ import TikTokPendingCard from "./TikTokPendingCard";
 import { useLiveQueue } from "@/store/LiveQueueProvider";
 type ToastState = { message: string; undo?: QueueEntry; token: number };
 export default function LiveDashboard() {
- const {entries,setEntries,now,rules,settings,runAction,connection,tiktokPending,error,ready} = useLiveQueue();
+ const {entries,setEntries,now,rules,settings,runAction,connection,tiktokPending,error} = useLiveQueue();
  const live = connection?.tiktokStatus === "CONNECTED";
- const listenerLabel = live ? "Connected" : connection?.tiktokStatus === "CONNECTING" ? "Connecting" : "Offline";
  const [tab, setTab] = useState("queue");
  const [filter, setFilter] = useState("all");
  const [search, setSearch] = useState("");
@@ -81,10 +80,9 @@ export default function LiveDashboard() {
  const visibleTikTokPending = tab === "pending" ? livePending.filter(e => `${e.displayName} ${e.tiktokNickname} ${e.tiktokUsername} ${e.question}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) : [];
  const visible = source.filter(e => `${e.displayName} ${e.tiktokNickname ?? ""} ${e.tiktokUsername} ${e.question}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
  return <div className={`app-shell ${settings.compactMode?"compact-queues":""} ${!settings.showTikTokUsername?"hide-usernames":""}`}>
-  <header className="topbar"><Link href="/live" className="brand"><span className="brand-mark"><Icon name="moon" size={23}/><span>✦</span></span><span>tarot<span className="brand-live">LIVE</span><small>QUEUE</small></span></Link><div className="connections"><Link className="button settings-link" href="/settings/gifts"><Icon name="gift" size={15}/>กติกาของขวัญ</Link><span className="mock-badge"><span/>{!ready ? "กำลังโหลด" : error ? "API Offline" : "Live Backend"}</span><span className="connection"><b>♪</b> TikTok <span className="connection-status">{listenerLabel}</span></span><span className="connection"><Icon name="gift" size={15}/> Neon PostgreSQL <span className="connection-status">Realtime</span></span></div></header>
+  <header className="topbar"><Link href="/live" className="brand"><span className="brand-mark"><Icon name="moon" size={23}/><span>✦</span></span><span>tarot<span className="brand-live">LIVE</span><small>QUEUE</small></span></Link><div className="connections"><Link className="button settings-link" href="/settings/gifts"><Icon name="gift" size={15}/>กติกาของขวัญ</Link><span className={`connection live-connection-status ${live ? "is-connected" : "is-disconnected"}`} role="status" aria-label={live ? "CONNECTED" : "DISCONNECTED"}><span className={`dot ${live ? "green-dot" : "red-dot"}`} aria-hidden="true"/><span>{live ? "CONNECTED" : "DISCONNECTED"}</span></span></div></header>
   <main>
-   <section className="page-intro"><div><div className="eyebrow">YOUR LITTLE COSMIC WORKSPACE <span>✧</span></div><h1>ทุกคำถาม มีจังหวะของมัน<span className="title-star">✦</span></h1><p>ดูแลทุกคิว แล้วปล่อยให้ไพ่เล่าเรื่องที่เหลือ</p></div><div className="session"><span className={live ? "dot green-dot" : "dot"}/>{live ? "LIVE SESSION" : "LIVE WORKSPACE"}<span className="session-time">{live ? (connection?.username ? `@${connection.username}` : "กำลังไลฟ์") : "พร้อมเมื่อคุณพร้อม"}</span></div></section>
-   <TikTokConnectionPanel/>
+   <section className="page-intro"><div><div className="eyebrow">YOUR LITTLE COSMIC WORKSPACE <span>✧</span></div><h1>ทุกคำถาม มีจังหวะของมัน<span className="title-star">✦</span></h1><p>ดูแลทุกคิว แล้วปล่อยให้ไพ่เล่าเรื่องที่เหลือ</p></div><TikTokConnectionPanel compact/></section>
    {error && <p className="form-error" role="alert">เชื่อมต่อระบบคิวไม่ได้ · ตรวจสอบว่า API และฐานข้อมูลพร้อมใช้งาน</p>}
    <section className="stats" aria-label="สรุปคิว"><Stat icon="clock" label="รอคำตอบ" english="WAITING" count={waiting.length} tone="gold"/><Stat icon="message" label="กำลังตอบ" english="ANSWERING" count={current ? 1 : 0} tone="purple"/><Stat icon="check" label="ตอบแล้ว" english="ANSWERED" count={answered.length} tone="green"/><Stat icon="bolt" label="คิวลัด" english="EXPRESS" count={express} tone="gold"/></section>
    <section className="spotlight-grid"><article className="current-panel"><div className="panel-top"><span className="panel-label"><span className="dot purple-dot"/>กำลังตอบ <span className="english-label">IN THE SPOTLIGHT</span></span><span className="timer"><Icon name="clock" size={14}/>{current?.answerStartedAt ? elapsed(current.answerStartedAt) : "00:00"}</span></div>

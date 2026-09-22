@@ -3,7 +3,7 @@ import { useState } from "react";
 import { connectTikTok, disconnectTikTok } from "@/lib/api";
 import { useLiveQueue } from "@/store/LiveQueueProvider";
 
-export default function TikTokConnectionPanel() {
+export default function TikTokConnectionPanel({ compact = false }: { compact?: boolean }) {
  const { connection, setConnection } = useLiveQueue();
  const [username, setUsername] = useState("");
  const [busy, setBusy] = useState(false);
@@ -16,8 +16,8 @@ export default function TikTokConnectionPanel() {
   catch (cause) { setError((cause as Error).message); }
   finally { setBusy(false); }
  };
- return <section className="tiktok-connect-panel" aria-label="เชื่อมต่อ TikTok LIVE">
-  <div><h2>เชื่อมต่อ TikTok LIVE</h2><p>เริ่มไลฟ์ใน TikTok แล้วกรอกชื่อบัญชีเจ้าของไลฟ์</p></div>
+ return <section className={`tiktok-connect-panel${compact ? " compact" : ""}`} aria-label="เชื่อมต่อ TikTok LIVE">
+  {!compact && <div><h2>เชื่อมต่อ TikTok LIVE</h2><p>เริ่มไลฟ์ใน TikTok แล้วกรอกชื่อบัญชีเจ้าของไลฟ์</p></div>}
   <form onSubmit={event => { event.preventDefault(); void act(); }}>
    <label htmlFor="live-username">ชื่อบัญชี TikTok</label>
    <div className="tiktok-connect-controls"><input id="live-username" placeholder="@yourname" autoComplete="off" spellCheck={false} maxLength={25} value={username} onChange={event => setUsername(event.target.value)} disabled={busy}/>
@@ -26,6 +26,6 @@ export default function TikTokConnectionPanel() {
   </form>
   <div className="tiktok-connection-detail" role="status"><span className={status === "CONNECTED" ? "green" : "muted"}>{label}{connection?.username ? ` · @${connection.username}` : ""}</span>{connection?.roomId && <small>ห้องไลฟ์ {connection.roomId}</small>}{connection?.detail && <small>{connection.detail}</small>}</div>
   {error && <p className="form-error" role="alert">{error}</p>}
-  <p className="tiktok-flow-hint">คอมเมนต์ <strong>ชื่อ/คำถาม</strong> → รอของขวัญ → พร้อมตอบ · ส่งของขวัญก่อนก็ได้ ระบบรอจับคู่กับคำถามจากบัญชีเดียวกัน</p>
+  {!compact && <p className="tiktok-flow-hint">คอมเมนต์ <strong>ชื่อ/คำถาม</strong> → รอของขวัญ → พร้อมตอบ · ส่งของขวัญก่อนก็ได้ ระบบรอจับคู่กับคำถามจากบัญชีเดียวกัน</p>}
  </section>;
 }
