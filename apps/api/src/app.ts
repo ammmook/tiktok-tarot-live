@@ -11,12 +11,14 @@ import { registerQueueRoutes } from "./routes/queue.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerTikTokRoutes } from "./routes/tiktok.js";
 import { expireTikTokPending } from "./modules/tiktok/service.js";
+import { TikTokControl } from "./modules/tiktok/control.js";
 import { createSocketServer } from "./socket/index.js";
 
 export async function buildApp(config: AppConfig = loadConfig()) {
   const app = Fastify({ logger: { level: config.LOG_LEVEL } });
   const { db, pool } = createDatabaseWithPool(config.DATABASE_URL);
   const io = createSocketServer(app.server, config);
+  const tiktokControl = new TikTokControl();
 
   await app.register(helmet);
   await app.register(cors, {
@@ -26,10 +28,10 @@ export async function buildApp(config: AppConfig = loadConfig()) {
     allowedHeaders: ["Content-Type", "Authorization", "X-Listener-Key"],
   });
   await registerHealthRoute(app, db);
-  await registerQueueRoutes(app, { db, io });
+  await registerQueueRoutes(app, { db, io, control: tiktokControl });
   await registerIngestRoutes(app, { db, io, config });
-  await registerTikTokRoutes(app, { db, io, config });
-  await registerSettingsRoutes(app, { db, io });
+  await registerTikTokRoutes(app, { db, io, config, control: tiktokControl });
+  await registerSettingsRoutes(app, { db, io, control: tiktokControl });
 
   const pendingExpiryTimer = setInterval(() => {
     void expireTikTokPending(db).catch((error) => app.log.error(error, "TikTok pending-item expiry sweep failed"));

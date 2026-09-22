@@ -1,11 +1,45 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Database } from "@tarot-live/db";
-import { giftRules, questionCredits, queueEntries, queueEvents, queueSettings } from "@tarot-live/db/schema";
+import { giftRules, liveSessions, questionCredits, queueEntries, queueEvents, queueSettings, tiktokAccountSettings } from "@tarot-live/db/schema";
+import { storedUsername } from "./rules.js";
 import { toGiftRuleDto, toQueueEntryDto, toQueueSettingsDto } from "./mapping.js";
 import type { QueueEntryDto, QueueRow, QueueSettingsDto, GiftRuleDto } from "./types.js";
 
 export const activeStatuses = ["WAITING", "ANSWERING", "SKIPPED", "PENDING_QUESTION", "PENDING_APPROVAL"] as const;
 export const terminalStatuses = ["ANSWERED", "CANCELLED", "DELETED"] as const;
+
+function accountConfig(row: typeof tiktokAccountSettings.$inferSelect) {
+  return {
+    rules: row.giftRules as unknown as GiftRuleDto[],
+    settings: row.queueSettings as unknown as QueueSettingsDto,
+  };
+}
+
+async function findAccountConfig(db: Database, username?: string | null) {
+  if (!username) return null;
+  const [row] = await db.select().from(tiktokAccountSettings)
+    .where(eq(tiktokAccountSettings.tiktokUsername, storedUsername(username))).limit(1);
+  return row ? accountConfig(row) : null;
+}
+
+export async function ensureAccountSettings(db: Database, username: string) {
+  const tiktokUsername = storedUsername(username);
+  const existing = await findAccountConfig(db, tiktokUsername);
+  if (existing) return existing;
+  const [defaultSettings] = await db.select().from(queueSettings).where(eq(queueSettings.id, "default")).limit(1);
+  if (!defaultSettings) throw new Error("Queue settings are not initialized");
+  const defaultRules = await db.select().from(giftRules).orderBy(asc(giftRules.displayOrder), asc(giftRules.priority));
+  const values = {
+    tiktokUsername,
+    giftRules: defaultRules.map((rule) => toGiftRuleDto(rule as unknown as Record<string, unknown>)) as unknown as Record<string, unknown>[],
+    queueSettings: toQueueSettingsDto(defaultSettings as unknown as Record<string, unknown>) as unknown as Record<string, unknown>,
+    updatedAt: new Date(),
+  };
+  await db.insert(tiktokAccountSettings).values(values).onConflictDoNothing();
+  const account = await findAccountConfig(db, tiktokUsername);
+  if (!account) throw new Error("Unable to initialize account settings");
+  return account;
+}
 
 export function queueOrder() {
   return sql`CASE
@@ -34,13 +68,28 @@ export async function findByExternalEventId(db: Database, key: string) {
   return row;
 }
 
-export async function listActive(db: Database): Promise<QueueEntryDto[]> {
-  const rows = await db.select().from(queueEntries).where(inArray(queueEntries.status, activeStatuses)).orderBy(queueOrder());
+async function sessionIdsForUsername(db: Database, username: string | null | undefined) {
+  if (!username) return [];
+  const sessions = await db.select({ id: liveSessions.id }).from(liveSessions)
+    .where(eq(liveSessions.tiktokUsername, storedUsername(username)));
+  return sessions.map((session) => session.id);
+}
+
+export async function listActive(db: Database, username?: string | null): Promise<QueueEntryDto[]> {
+  const sessionIds = await sessionIdsForUsername(db, username);
+  if (!sessionIds.length) return [];
+  const rows = await db.select().from(queueEntries)
+    .where(and(inArray(queueEntries.status, activeStatuses), inArray(queueEntries.liveSessionId, sessionIds)))
+    .orderBy(queueOrder());
   return rows.map(toQueueEntryDto);
 }
 
-export async function listHistory(db: Database, limit: number): Promise<QueueEntryDto[]> {
-  const rows = await db.select().from(queueEntries).where(inArray(queueEntries.status, terminalStatuses)).orderBy(desc(queueEntries.updatedAt), desc(queueEntries.queueNumber)).limit(limit);
+export async function listHistory(db: Database, limit: number, username?: string | null): Promise<QueueEntryDto[]> {
+  const sessionIds = await sessionIdsForUsername(db, username);
+  if (!sessionIds.length) return [];
+  const rows = await db.select().from(queueEntries)
+    .where(and(inArray(queueEntries.status, terminalStatuses), inArray(queueEntries.liveSessionId, sessionIds)))
+    .orderBy(desc(queueEntries.updatedAt), desc(queueEntries.queueNumber)).limit(limit);
   return rows.map(toQueueEntryDto);
 }
 
@@ -49,13 +98,17 @@ export async function getQueueOrder(db: Database) {
   return rows.map((row) => row.id);
 }
 
-export async function getSettings(db: Database): Promise<QueueSettingsDto> {
+export async function getSettings(db: Database, username?: string | null): Promise<QueueSettingsDto> {
+  const account = await findAccountConfig(db, username);
+  if (account) return account.settings;
   const [row] = await db.select().from(queueSettings).where(eq(queueSettings.id, "default")).limit(1);
   if (!row) throw new Error("Queue settings are not initialized");
   return toQueueSettingsDto(row as unknown as Record<string, unknown>);
 }
 
-export async function getGiftRules(db: Database): Promise<GiftRuleDto[]> {
+export async function getGiftRules(db: Database, username?: string | null): Promise<GiftRuleDto[]> {
+  const account = await findAccountConfig(db, username);
+  if (account) return account.rules;
   const rows = await db.select().from(giftRules).orderBy(asc(giftRules.displayOrder), asc(giftRules.priority));
   return rows.map((row) => toGiftRuleDto(row as unknown as Record<string, unknown>));
 }

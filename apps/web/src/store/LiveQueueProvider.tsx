@@ -9,7 +9,7 @@ import { getTikTokConnection, getTikTokPending, type TikTokConnection, type TikT
 import { playNewQueueSound, unlockNotificationAudio } from "@/lib/notificationSound";
 
 type QueueEvent = { eventId: string; entry?: QueueEntry; relatedEntries?: QueueEntry[]; queueOrder?: string[] };
-type SettingsEvent = { rules: GiftRule[]; settings: QueueSettings };
+type SettingsEvent = { rules: GiftRule[]; settings: QueueSettings; username?: string | null };
 
 interface Store {
  rules: GiftRule[]; settings: QueueSettings; entries: QueueEntry[]; now: number; ready: boolean; error: string;
@@ -45,11 +45,22 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const actionId = useRef(0);
  const seenCreationEvents = useRef(new Set<string>());
  const seenCreationEntries = useRef(new Set<string>());
+ const seenPendingEntries = useRef(new Set<string>());
+ const pendingNotificationsReady = useRef(false);
  const readyRef = useRef(false);
+ const connectionRef = useRef<TikTokConnection | null>(null);
+
+ const applyTikTokPending = (pending: TikTokPending[], notify = false) => {
+  const newEntries = pending.filter(entry => !seenPendingEntries.current.has(entry.id));
+  for (const entry of pending) seenPendingEntries.current.add(entry.id);
+  setTikTokPending(pending);
+  if (notify && pendingNotificationsReady.current && newEntries.length) playNewQueueSound();
+  pendingNotificationsReady.current = true;
+ };
 
  const reload = async () => {
   const [snapshot,active,history,pending] = await Promise.all([getSettings(),getQueue(),getHistory(),getTikTokPending()]);
-  setTikTokPending(pending);
+  applyTikTokPending(pending);
   setRules(snapshot.rules); setSettings(snapshot.settings); setEntries(mergeEntries([], [...active,...history])); setError(""); setReady(true); readyRef.current=true;
   void getTikTokConnection().then(setConnection).catch(() => setConnection(null));
  };
@@ -68,7 +79,7 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
    const version = ++refreshVersion;
    try {
     const [status,pending] = await Promise.all([getTikTokConnection(),getTikTokPending()]);
-    if(version === refreshVersion) { setConnection(status); setTikTokPending(pending); }
+    if(version === refreshVersion) { setConnection(status); applyTikTokPending(pending, true); }
    } catch { if(version === refreshVersion) setConnection(null); }
   };
   const tiktokInterval = window.setInterval(() => { void refreshTikTok(); }, 3000);
@@ -76,9 +87,9 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   window.addEventListener("pointerdown",unlock,{once:true}); window.addEventListener("keydown",unlock,{once:true});
   const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? API_URL,{transports:["websocket","polling"],reconnection:true});
   const applyQueueEvent = (event:QueueEvent,playSound=false) => {
-   const incoming=[event.entry,...(event.relatedEntries ?? [])].filter(Boolean) as QueueEntry[];
-   if(incoming.length) setEntries(current => mergeEntries(current,incoming,event.queueOrder));
+   if (!connectionRef.current?.username) return;
    if(playSound&&event.entry&&!seenCreationEvents.current.has(event.eventId)&&!seenCreationEntries.current.has(event.entry.id)){seenCreationEvents.current.add(event.eventId);seenCreationEntries.current.add(event.entry.id);playNewQueueSound();}
+   void reload().catch(loadError => setError((loadError as Error).message));
   };
   socket.on("queue:created",(event:QueueEvent)=>applyQueueEvent(event,true));
   socket.on("queue:updated",(event:QueueEvent)=>applyQueueEvent(event));
@@ -87,13 +98,21 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   socket.on("queue:cancelled",(event:QueueEvent)=>applyQueueEvent(event));
   socket.on("queue:deleted",(event:QueueEvent)=>applyQueueEvent(event));
   socket.on("queue:reordered",(event:QueueEvent)=>applyQueueEvent(event));
-  socket.on("settings:updated",(event:SettingsEvent)=>{setRules(event.rules);setSettings(event.settings);});
+  socket.on("settings:updated",(event:SettingsEvent)=>{if(!event.username || event.username === connectionRef.current?.username){setRules(event.rules);setSettings(event.settings);}});
   socket.on("tiktok:pending-changed", () => { void refreshTikTok(); });
   socket.on("tiktok:status-changed", () => { void refreshTikTok(); });
   socket.on("connect",()=>{if(readyRef.current) void reload().catch(loadError=>setError((loadError as Error).message));});
   const initialLoad = window.setTimeout(()=>{void reload().catch(loadError=>{setError((loadError as Error).message);setReady(true);readyRef.current=true;});},0);
   return ()=>{window.clearInterval(interval);refreshVersion++;window.clearInterval(tiktokInterval);window.clearTimeout(initialLoad);window.removeEventListener("pointerdown",unlock);window.removeEventListener("keydown",unlock);socket.removeAllListeners();socket.close();};
  },[]);
+
+ useEffect(() => {
+  connectionRef.current = connection;
+  if (connection?.username) return;
+  setEntries([]);
+  setTikTokPending([]);
+  seenPendingEntries.current.clear();
+ }, [connection?.username]);
 
  const commitSettings = async (nextRules:GiftRule[],nextSettings:QueueSettings) => runAction("กำลังบันทึกการตั้งค่า", async () => {
   const snapshot=await updateSettings(nextRules.map(rule=>({...rule,isExpress:rule.queueType==="express"})),nextSettings);

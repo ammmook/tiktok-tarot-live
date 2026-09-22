@@ -1,9 +1,9 @@
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Database } from "@tarot-live/db";
-import { giftRules, listenerHealth, liveSessions, pendingQuestions, questionCredits, queueEntries, tiktokProcessedEvents } from "@tarot-live/db/schema";
+import { listenerHealth, liveSessions, pendingQuestions, questionCredits, queueEntries, tiktokProcessedEvents } from "@tarot-live/db/schema";
 import { calculateRights, storedUsername } from "../queue/rules.js";
-import { activeStatuses, queueOrder, recordEvent } from "../queue/repository.js";
-import { toGiftRuleDto, toQueueEntryDto } from "../queue/mapping.js";
+import { activeStatuses, ensureAccountSettings, getGiftRules, queueOrder, recordEvent } from "../queue/repository.js";
+import { toQueueEntryDto } from "../queue/mapping.js";
 import type { GiftRuleDto, QueueMutationResult, QueueRow } from "../queue/types.js";
 import type { ListenerStatusInput, TikTokEventInput } from "./schemas.js";
 
@@ -180,6 +180,7 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
   if (input.type === "gift" && input.gift.giftType === 1 && !input.gift.repeatEnd) {
     return { replayed: false, mutations: [] as QueueMutationResult[], disposition: "streak_in_progress" };
   }
+  await ensureAccountSettings(db, input.liveUsername);
   return db.transaction(async (tx) => {
     const now = new Date();
     await expireWithinTransaction(tx, now);
@@ -226,10 +227,10 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
     }
     // Numeric IDs are exact; named codes keep existing dashboard rules usable.
     const giftCode = input.gift.giftName.trim().toLowerCase().replace(/\s+/g, "-");
-    const availableRules = await tx.select().from(giftRules);
-    const ruleRow = availableRules.find(rule => rule.giftCode === input.gift.giftId.toLowerCase())
-      ?? availableRules.find(rule => rule.giftCode === giftCode);
-    const rule = ruleRow ? toGiftRuleDto(ruleRow as unknown as Record<string, unknown>) : null;
+    const availableRules = await getGiftRules(tx as unknown as Database, input.liveUsername);
+    const rule = availableRules.find(item => item.giftCode === input.gift.giftId.toLowerCase())
+      ?? availableRules.find(item => item.giftCode === giftCode)
+      ?? null;
     if (!rule || !rule.active || input.gift.repeatCount < rule.minimumGiftCount) {
       await updateReceipt(tx, receipt.id, "IGNORED_GIFT", now);
       return { replayed: false, mutations: [] as QueueMutationResult[], disposition: "ignored_gift" };
@@ -314,11 +315,16 @@ export async function getLatestListenerStatus(db: Database, instanceId?: string)
   return row;
 }
 
-export async function getTikTokPending(db: Database) {
+export async function getTikTokPending(db: Database, liveUsername?: string | null) {
+  if (!liveUsername) return [];
   const now = new Date();
+  const sessions = await db.select({ id: liveSessions.id }).from(liveSessions)
+    .where(eq(liveSessions.tiktokUsername, storedUsername(liveUsername)));
+  const sessionIds = sessions.map((session) => session.id);
+  if (!sessionIds.length) return [];
   const [questions, credits] = await Promise.all([
-    db.select().from(pendingQuestions).where(and(eq(pendingQuestions.status, "WAITING_FOR_GIFT"), gt(pendingQuestions.expiresAt, now))),
-    db.select().from(questionCredits).where(and(eq(questionCredits.source, "tiktok"), eq(questionCredits.status, "WAITING_FOR_QUESTION"), gt(questionCredits.expiresAt, now))),
+    db.select().from(pendingQuestions).where(and(inArray(pendingQuestions.liveSessionId, sessionIds), eq(pendingQuestions.status, "WAITING_FOR_GIFT"), gt(pendingQuestions.expiresAt, now))),
+    db.select().from(questionCredits).where(and(inArray(questionCredits.liveSessionId, sessionIds), eq(questionCredits.source, "tiktok"), eq(questionCredits.status, "WAITING_FOR_QUESTION"), gt(questionCredits.expiresAt, now))),
   ]);
   return [
     ...questions.map(q => ({ id: q.id, kind: "question" as const, status: "waiting_for_gift" as const,

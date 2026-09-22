@@ -77,6 +77,21 @@ export const queueSettings = pgTable("queue_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Gift rules and queue preferences saved independently for each TikTok live account. */
+export const tiktokAccountSettings = pgTable(
+  "tiktok_account_settings",
+  {
+    tiktokUsername: varchar("tiktok_username", { length: 120 }).primaryKey(),
+    giftRules: jsonb("gift_rules").$type<Record<string, unknown>[]>().notNull(),
+    queueSettings: jsonb("queue_settings").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    updatedIndex: index("tiktok_account_settings_updated_idx").on(table.updatedAt),
+  }),
+);
+
 /** One record for each TikTok room the listener has connected to. */
 export const liveSessions = pgTable(
   "live_sessions",

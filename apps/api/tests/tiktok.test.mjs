@@ -7,13 +7,14 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerTikTokRoutes } from "../src/routes/tiktok.ts";
 import { processTikTokEvent, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
-import { createQueue, startQueue, completeQueue, restoreQueue } from "../src/modules/queue/service.ts";
+import { createQueue, startQueue, completeQueue, restoreQueue, getSettingsSnapshot, updateSettings } from "../src/modules/queue/service.ts";
+import { listActive } from "../src/modules/queue/repository.ts";
 import { AppError } from "../src/errors/app-error.ts";
 
 let client, db;
 before(async () => {
  client = new PGlite();
- for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql"]) {
+ for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql", "0004_tiktok_account_settings.sql"]) {
   const sql = await readFile(new URL(`../../../packages/db/migrations/${name}`, import.meta.url), "utf8");
   // PGlite provides gen_random_uuid natively; pgcrypto is not bundled.
   await client.exec(sql.replace("CREATE EXTENSION IF NOT EXISTS pgcrypto;", ""));
@@ -29,7 +30,8 @@ const gift = (id, userId, roomId = "room") => ({ type: "gift", eventId: id, room
 
 test("comment first is visible waiting for gift; same user's gift makes one ready queue", async () => {
  assert.equal((await processTikTokEvent(db, chat("c1", "1"), 10)).disposition, "waiting_for_gift");
- const pending = (await getTikTokPending(db)).find(p => p.tiktokUsername === "@user_1");
+ assert.deepEqual(await getTikTokPending(db), []);
+ const pending = (await getTikTokPending(db, "host")).find(p => p.tiktokUsername === "@user_1");
  assert.equal(pending.displayName, "มุก");
  assert.equal(pending.tiktokNickname, "TikTok 1");
  assert.equal(pending.status, "waiting_for_gift");
@@ -40,7 +42,9 @@ test("comment first is visible waiting for gift; same user's gift makes one read
  assert.equal(entry.question, "งานใหม่จะดีไหม");
  assert.equal(entry.giftImageUrl, "https://example.com/rose.png");
  assert.equal(entry.profilePictureUrl, "https://example.com/avatar.png");
- assert.equal((await getTikTokPending(db)).some(p => p.tiktokUsername === "@user_1"), false);
+ assert.equal((await listActive(db)).length, 0);
+ assert.ok((await listActive(db, "host")).some(queue => queue.id === entry.id));
+ assert.equal((await getTikTokPending(db, "host")).some(p => p.tiktokUsername === "@user_1"), false);
  await startQueue(db, entry.id);
  const completed = await completeQueue(db, entry.id);
  assert.equal(completed.entry.status, "answered");
@@ -51,7 +55,7 @@ test("comment first is visible waiting for gift; same user's gift makes one read
 
 test("gift first waits for the same stable user ID; same nickname is not sufficient", async () => {
  assert.equal((await processTikTokEvent(db, gift("g2", "2"), 10)).disposition, "waiting_for_question");
- assert.equal((await getTikTokPending(db)).find(p => p.tiktokUsername === "@user_2").giftName, "Rose");
+ assert.equal((await getTikTokPending(db, "host")).find(p => p.tiktokUsername === "@user_2").giftName, "Rose");
  const other = chat("c-other", "other"); other.user.nickname = "TikTok 2";
  assert.equal((await processTikTokEvent(db, other, 10)).disposition, "waiting_for_gift");
  const same = chat("c2", "2"); same.user.username = "renamed_account";
@@ -63,7 +67,7 @@ test("streak progress cannot consume the final id; replayed final count grants o
  assert.equal((await processTikTokEvent(db, { ...final, gift: { ...final.gift, repeatEnd: false } }, 10)).disposition, "streak_in_progress");
  assert.equal((await processTikTokEvent(db, final, 10)).disposition, "waiting_for_question");
  assert.equal((await processTikTokEvent(db, final, 10)).replayed, true);
- assert.equal((await getTikTokPending(db)).filter(p => p.tiktokUsername === "@user_3").length, 1);
+ assert.equal((await getTikTokPending(db, "host")).filter(p => p.tiktokUsername === "@user_3").length, 1);
 });
 
 test("room boundaries, expired credits, malformed comments and disabled gifts do not match", async () => {
@@ -80,9 +84,9 @@ test("room boundaries, expired credits, malformed comments and disabled gifts do
 test("named gift rules work and ending a stream removes waiting items", async () => {
  const event = gift("galaxy", "7", "ending-room"); event.gift.giftId = "999"; event.gift.giftName = "Galaxy";
  await processTikTokEvent(db, event, 10);
- assert.equal((await getTikTokPending(db)).some(p => p.tiktokUsername === "@user_7"), true);
+ assert.equal((await getTikTokPending(db, "host")).some(p => p.tiktokUsername === "@user_7"), true);
  await reportListenerStatus(db, { instanceId: "ended", liveUsername: "host", status: "OFFLINE", tiktokStatus: "ENDED", authenticationStatus: "missing", roomId: "ending-room", startedAt: Date.now() });
- assert.equal((await getTikTokPending(db)).some(p => p.tiktokUsername === "@user_7"), false);
+ assert.equal((await getTikTokPending(db, "host")).some(p => p.tiktokUsername === "@user_7"), false);
 });
 
 test("dashboard control validates usernames, requires a live worker and isolates old status", async () => {
@@ -120,4 +124,20 @@ test("restoring a queue inserts it directly after the current answer", async () 
  const order = restored.queueOrder;
  assert.ok(order.indexOf(current.entry.id) < order.indexOf(closed.entry.id));
  assert.ok(order.indexOf(closed.entry.id) < order.indexOf(existing.entry.id));
+});
+
+test("gift rules and queue settings are isolated by TikTok account", async () => {
+ const first = await getSettingsSnapshot(db, "account-one");
+ const second = await getSettingsSnapshot(db, "account-two");
+ const firstRules = first.rules.map(rule => rule.id === "test-rose" ? { ...rule, priority: 7 } : rule);
+ await updateSettings(db, { rules: firstRules, settings: { ...first.settings, maxQuestionLength: 80 } }, "account-one");
+ assert.equal((await getSettingsSnapshot(db, "account-one")).settings.maxQuestionLength, 80);
+ assert.equal((await getSettingsSnapshot(db, "account-two")).settings.maxQuestionLength, second.settings.maxQuestionLength);
+ assert.equal((await getSettingsSnapshot(db, "account-two")).rules.find(rule => rule.id === "test-rose").priority, 30);
+
+ const accountGift = { ...gift("account-one-gift", "account-user", "account-room"), liveUsername: "account-one" };
+ const accountChat = { ...chat("account-one-chat", "account-user", "account-room"), liveUsername: "account-one" };
+ await processTikTokEvent(db, accountGift, 10);
+ const result = await processTikTokEvent(db, accountChat, 10);
+ assert.equal(result.mutations[0].entry.giftPriority, 7);
 });

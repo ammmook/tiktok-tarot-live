@@ -1,10 +1,10 @@
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Database } from "@tarot-live/db";
-import { giftRules, questionCredits, queueEntries, queueSettings } from "@tarot-live/db/schema";
+import { questionCredits, queueEntries, tiktokAccountSettings } from "@tarot-live/db/schema";
 import { conflict, invalidTransition, notFound } from "../../errors/app-error.js";
 import { calculateRights, makeDedupeKey, storedUsername } from "./rules.js";
-import { activeStatuses, getGiftRules, getSettings, queueOrder, recordEvent } from "./repository.js";
-import { toGiftRuleDto, toGiftRuleValues, toQueueEntryDto, toQueueSettingsValues } from "./mapping.js";
+import { activeStatuses, ensureAccountSettings, getGiftRules, getSettings, queueOrder, recordEvent } from "./repository.js";
+import { toQueueEntryDto } from "./mapping.js";
 import type { GiftRuleDto, QuestionCreditRow, QueueMutationResult, QueueRow, QueueSettingsDto } from "./types.js";
 import type { CreateQuestionInput, CreateQueueInput, SettingsInput, UpdateQueueInput } from "./schemas.js";
 
@@ -280,15 +280,14 @@ async function creditReplay(tx: Transaction, idempotencyKey: string, externalEve
   return entry;
 }
 
-export async function createQueue(db: Database, input: CreateQueueInput): Promise<QueueMutationResult> {
+export async function createQueue(db: Database, input: CreateQueueInput, accountUsername?: string | null): Promise<QueueMutationResult> {
   try {
     return await db.transaction(async (tx) => {
       const replay = await queueReplay(tx, input.idempotencyKey, input.externalEventId) ?? await creditReplay(tx, input.idempotencyKey, input.externalEventId);
       if (replay) return { ...(await mutation(tx, replay, [], "queue:created")), replayed: true };
 
-      const settings = await getSettings(tx as unknown as Database);
-      const [ruleRow] = await tx.select().from(giftRules).where(eq(giftRules.id, input.giftRuleId)).limit(1);
-      const rule = ruleRow ? toGiftRuleDto(ruleRow as unknown as Record<string, unknown>) : null;
+      const settings = await getSettings(tx as unknown as Database, accountUsername);
+      const rule = (await getGiftRules(tx as unknown as Database, accountUsername)).find((item) => item.id === input.giftRuleId) ?? null;
       validateRule(rule, input.giftCount);
       const question = input.question.trim();
       assertQuestionLength(question, settings);
@@ -367,13 +366,13 @@ export async function createQueue(db: Database, input: CreateQueueInput): Promis
   }
 }
 
-export async function createQuestion(db: Database, input: CreateQuestionInput): Promise<QueueMutationResult> {
+export async function createQuestion(db: Database, input: CreateQuestionInput, accountUsername?: string | null): Promise<QueueMutationResult> {
   try {
     return await db.transaction(async (tx) => {
       const replay = await queueReplay(tx, input.idempotencyKey, input.externalEventId);
       if (replay) return { ...(await mutation(tx, replay, [], "queue:created")), replayed: true };
 
-      const settings = await getSettings(tx as unknown as Database);
+      const settings = await getSettings(tx as unknown as Database, accountUsername);
       const question = input.question.trim();
       assertQuestionLength(question, settings);
       const username = storedUsername(input.tiktokUsername);
@@ -415,10 +414,10 @@ async function load(tx: Transaction, id: string) {
   return row;
 }
 
-export async function updateQueue(db: Database, id: string, input: UpdateQueueInput) {
+export async function updateQueue(db: Database, id: string, input: UpdateQueueInput, accountUsername?: string | null) {
   return db.transaction(async (tx) => {
     const row = await load(tx, id);
-    const settings = await getSettings(tx as unknown as Database);
+    const settings = await getSettings(tx as unknown as Database, accountUsername);
     const question = input.question?.trim() ?? row.question;
     assertQuestionLength(question, settings);
     await lockUser(tx, row.username);
@@ -443,7 +442,7 @@ export async function updateQueue(db: Database, id: string, input: UpdateQueueIn
   });
 }
 
-async function transition(db: Database, id: string, target: QueueRow["status"], eventType: QueueMutationResult["eventType"]) {
+async function transition(db: Database, id: string, target: QueueRow["status"], eventType: QueueMutationResult["eventType"], accountUsername?: string | null) {
   return db.transaction(async (tx) => {
     await lockQueue(tx);
     const row = await load(tx, id);
@@ -470,7 +469,7 @@ async function transition(db: Database, id: string, target: QueueRow["status"], 
           : { status: target, deletedAt: now, dedupeKey: null, restoreNext: false, updatedAt: now };
     const [updated] = await tx.update(queueEntries).set(values).where(eq(queueEntries.id, id)).returning();
     await recordEvent(tx as unknown as Database, id, (eventType ?? "queue:updated").replace("queue:", ""), row.status, target);
-    const settings = await getSettings(tx as unknown as Database);
+    const settings = await getSettings(tx as unknown as Database, accountUsername);
     if (target === "ANSWERED" && settings.autoAdvance) {
       const [next] = await tx.select().from(queueEntries).where(eq(queueEntries.status, "WAITING")).orderBy(queueOrder()).limit(1);
       if (next) {
@@ -483,10 +482,10 @@ async function transition(db: Database, id: string, target: QueueRow["status"], 
   });
 }
 
-export const startQueue = (db: Database, id: string) => transition(db, id, "ANSWERING", "queue:started");
-export const completeQueue = (db: Database, id: string) => transition(db, id, "ANSWERED", "queue:completed");
-export const cancelQueue = (db: Database, id: string) => transition(db, id, "CANCELLED", "queue:cancelled");
-export const deleteQueue = (db: Database, id: string) => transition(db, id, "DELETED", "queue:deleted");
+export const startQueue = (db: Database, id: string, accountUsername?: string | null) => transition(db, id, "ANSWERING", "queue:started", accountUsername);
+export const completeQueue = (db: Database, id: string, accountUsername?: string | null) => transition(db, id, "ANSWERED", "queue:completed", accountUsername);
+export const cancelQueue = (db: Database, id: string, accountUsername?: string | null) => transition(db, id, "CANCELLED", "queue:cancelled", accountUsername);
+export const deleteQueue = (db: Database, id: string, accountUsername?: string | null) => transition(db, id, "DELETED", "queue:deleted", accountUsername);
 
 export async function skipQueue(db: Database, id: string) {
   return db.transaction(async (tx) => {
@@ -514,18 +513,19 @@ export async function restoreQueue(db: Database, id: string) {
   });
 }
 
-export async function getSettingsSnapshot(db: Database) {
-  return { rules: await getGiftRules(db), settings: await getSettings(db) };
+export async function getSettingsSnapshot(db: Database, accountUsername?: string | null) {
+  if (accountUsername) await ensureAccountSettings(db, accountUsername);
+  return { rules: await getGiftRules(db, accountUsername), settings: await getSettings(db, accountUsername) };
 }
 
-export async function updateSettings(db: Database, input: SettingsInput) {
-  return db.transaction(async (tx) => {
-    await tx.insert(queueSettings).values(toQueueSettingsValues(input.settings))
-      .onConflictDoUpdate({ target: queueSettings.id, set: toQueueSettingsValues(input.settings) });
-    for (const rule of input.rules) {
-      await tx.insert(giftRules).values(toGiftRuleValues(rule))
-        .onConflictDoUpdate({ target: giftRules.id, set: toGiftRuleValues(rule) });
-    }
-    return { rules: input.rules, settings: input.settings };
-  });
+export async function updateSettings(db: Database, input: SettingsInput, accountUsername?: string | null) {
+  if (!accountUsername) throw conflict("Connect a TikTok account before saving gift rules");
+  await ensureAccountSettings(db, accountUsername);
+  const tiktokUsername = storedUsername(accountUsername);
+  await db.update(tiktokAccountSettings).set({
+    giftRules: input.rules as unknown as Record<string, unknown>[],
+    queueSettings: input.settings as unknown as Record<string, unknown>,
+    updatedAt: new Date(),
+  }).where(eq(tiktokAccountSettings.tiktokUsername, tiktokUsername));
+  return { rules: input.rules, settings: input.settings };
 }

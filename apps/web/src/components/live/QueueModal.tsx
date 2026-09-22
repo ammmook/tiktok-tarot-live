@@ -7,8 +7,9 @@ import Icon from "@/components/ui/Icon";
 
 export function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const beganOnBackdrop = useRef(false);
   useEffect(() => { const dialog = ref.current; const previous = document.activeElement as HTMLElement; dialog?.showModal(); return () => { dialog?.close(); previous?.focus(); }; }, []);
-  return <dialog ref={ref} onCancel={onClose} onClick={e => { if(e.target === e.currentTarget) onClose(); }} aria-labelledby="dialog-title"><div className="modal-content"><div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="ปิด"><Icon name="close"/></button></div>{children}</div></dialog>;
+  return <dialog ref={ref} onCancel={onClose} onPointerDown={event => { beganOnBackdrop.current = event.target === event.currentTarget; }} onPointerUp={event => { if (beganOnBackdrop.current && event.target === event.currentTarget) onClose(); beganOnBackdrop.current = false; }} onPointerCancel={() => { beganOnBackdrop.current = false; }} aria-labelledby="dialog-title"><div className="modal-content"><div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="ปิด"><Icon name="close"/></button></div>{children}</div></dialog>;
 }
 
 export function QueueModal({ entry, onSave, onClose, saveError }: { entry?: QueueEntry; onSave: (input: QueueInput) => void; onClose: () => void; saveError?:string }) {
