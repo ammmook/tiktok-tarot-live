@@ -16,8 +16,9 @@ function number(value: unknown) {
 }
 
 function imageUrl(value: unknown) {
+  if (typeof value === "string") return value || undefined;
   const model = record(value);
-  const list = model?.urlList;
+  const list = model?.urlList ?? model?.url_list ?? model?.url;
   if (Array.isArray(list)) return list.map(string).find(Boolean);
   return string(model?.url) || undefined;
 }
@@ -31,17 +32,17 @@ function timestamp(value: unknown) {
 }
 
 function userFrom(input: RawRecord): NormalizedTikTokUser | null {
-  const user = record(input.user);
+  const user = record(input.user) ?? input;
   if (!user) return null;
-  const userId = string(user.id ?? user.userId);
-  const username = string(user.displayId ?? user.uniqueId ?? user.username);
+  const userId = string(user.userId ?? user.id);
+  const username = string(user.uniqueId ?? user.displayId ?? user.username);
   if (!userId || !username) return null;
   return {
     userId,
     secUid: string(user.secUid) || undefined,
     username,
     nickname: string(user.nickname ?? user.nickName) || username,
-    profilePictureUrl: imageUrl(user.avatarMedium) ?? imageUrl(user.avatarThumb) ?? imageUrl(user.avatarLarge),
+    profilePictureUrl: imageUrl(user.profilePictureUrl) ?? imageUrl(user.avatarMedium) ?? imageUrl(user.avatarThumb) ?? imageUrl(user.avatarLarge),
   };
 }
 
@@ -49,11 +50,11 @@ function eventMetadata(input: unknown, liveUsername: string, fallbackRoomId: str
   const event = record(input);
   if (!event) return null;
   const common = record(event.common);
-  const eventId = string(common?.msgId ?? event.logId ?? event.orderId);
+  const eventId = string(common?.msgId ?? event.msgId ?? event.logId ?? event.orderId);
   const roomId = string(common?.roomId) || fallbackRoomId;
   const user = userFrom(event);
   if (!eventId || !roomId || !user) return null;
-  return { event, common, eventId, roomId, user, liveUsername, timestamp: timestamp(common?.createTime) };
+  return { event, common, eventId, roomId, user, liveUsername, timestamp: timestamp(common?.createTime ?? event.createTime) };
 }
 
 export function normalizeChatEvent(input: unknown, liveUsername: string, fallbackRoomId: string): NormalizedChatEvent | null {
@@ -68,25 +69,28 @@ export function normalizeGiftEvent(input: unknown, liveUsername: string, fallbac
   const metadata = eventMetadata(input, liveUsername, fallbackRoomId);
   if (!metadata) return null;
   const gift = record(metadata.event.gift) ?? record(metadata.event.giftDetails) ?? {};
+  const extended = record(metadata.event.extendedGiftInfo) ?? {};
   const giftId = string(metadata.event.giftId ?? gift.id);
   const giftType = number(gift.type ?? gift.giftType ?? metadata.event.giftType);
   const repeatCount = Math.floor(number(metadata.event.repeatCount));
   if (!giftId || !repeatCount) return null;
   return {
     type: "gift",
-    eventId: metadata.eventId,
+    // A streak may emit multiple message IDs. Its final group is one purchase.
+    eventId: giftType === 1 && string(metadata.event.groupId) && string(metadata.event.groupId) !== "0"
+      ? `streak:${metadata.user.userId}:${giftId}:${string(metadata.event.groupId)}` : metadata.eventId,
     roomId: metadata.roomId,
     liveUsername,
     timestamp: metadata.timestamp,
     user: metadata.user,
     gift: {
       giftId,
-      giftName: string(gift.name ?? gift.giftName) || "Gift",
+      giftName: string(gift.name ?? gift.giftName ?? extended.name ?? metadata.event.giftName) || "Gift",
       giftType,
       repeatCount,
-      repeatEnd: Boolean(metadata.event.repeatEnd),
-      diamondCount: number(gift.diamondCount ?? gift.diamond_count) || undefined,
-      imageUrl: imageUrl(gift.image) ?? imageUrl(gift.icon) ?? imageUrl(metadata.event.giftImage),
+      repeatEnd: metadata.event.repeatEnd === true || metadata.event.repeatEnd === 1 || metadata.event.repeatEnd === "1",
+      diamondCount: number(gift.diamondCount ?? gift.diamond_count ?? extended.diamond_count ?? metadata.event.diamondCount) || undefined,
+      imageUrl: imageUrl(gift.image) ?? imageUrl(gift.giftImage) ?? imageUrl(gift.icon) ?? imageUrl(extended.image) ?? imageUrl(metadata.event.giftPictureUrl) ?? imageUrl(metadata.event.giftImage),
     },
   };
 }

@@ -4,7 +4,8 @@ import { createContext, useContext, useEffect, useRef, useState, type Dispatch, 
 import { io } from "socket.io-client";
 import type { GiftRule, QueueEntry, QueueSettings } from "@/types/queue";
 import { defaultGiftRules, defaultQueueSettings } from "@/data/defaultRules";
-import { API_URL, getHistory, getListenerStatus, getQueue, getSettings, updateSettings, type ListenerStatus } from "@/lib/api";
+import { API_URL, getHistory, getQueue, getSettings, updateSettings } from "@/lib/api";
+import { getTikTokConnection, getTikTokPending, type TikTokConnection, type TikTokPending } from "@/lib/api";
 import { playNewQueueSound, unlockNotificationAudio } from "@/lib/notificationSound";
 
 type QueueEvent = { eventId: string; entry?: QueueEntry; relatedEntries?: QueueEntry[]; queueOrder?: string[] };
@@ -16,9 +17,8 @@ interface Store {
  commitSettings: (rules: GiftRule[], settings: QueueSettings) => Promise<void>;
  runAction: <T>(label: string, action: () => Promise<T>) => Promise<T>;
  reload: () => Promise<void>;
- live: boolean; setLive: Dispatch<SetStateAction<boolean>>;
- liveStarted: number; setLiveStarted: Dispatch<SetStateAction<number>>;
- listenerStatus: ListenerStatus | null;
+ connection: TikTokConnection | null; setConnection: Dispatch<SetStateAction<TikTokConnection | null>>;
+ tiktokPending: TikTokPending[];
 }
 const Context = createContext<Store | null>(null);
 
@@ -39,9 +39,8 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const [now,setNow] = useState(0);
  const [ready,setReady] = useState(false);
  const [error,setError] = useState("");
- const [live,setLive] = useState(false);
- const [liveStarted,setLiveStarted] = useState(0);
- const [listenerStatus,setListenerStatus] = useState<ListenerStatus | null>(null);
+ const [connection,setConnection] = useState<TikTokConnection | null>(null);
+ const [tiktokPending,setTikTokPending] = useState<TikTokPending[]>([]);
  const [pendingActions,setPendingActions] = useState<{id:number;label:string}[]>([]);
  const actionId = useRef(0);
  const seenCreationEvents = useRef(new Set<string>());
@@ -49,9 +48,10 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const readyRef = useRef(false);
 
  const reload = async () => {
-  const [snapshot,active,history] = await Promise.all([getSettings(),getQueue(),getHistory()]);
+  const [snapshot,active,history,pending] = await Promise.all([getSettings(),getQueue(),getHistory(),getTikTokPending()]);
+  setTikTokPending(pending);
   setRules(snapshot.rules); setSettings(snapshot.settings); setEntries(mergeEntries([], [...active,...history])); setError(""); setReady(true); readyRef.current=true;
-  void getListenerStatus().then(setListenerStatus).catch(() => setListenerStatus(null));
+  void getTikTokConnection().then(setConnection).catch(() => setConnection(null));
  };
 
  const runAction = async <T,>(label: string, action: () => Promise<T>) => {
@@ -63,7 +63,15 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
 
  useEffect(() => {
   const interval = window.setInterval(() => setNow(Date.now()),1000);
-  const listenerStatusInterval = window.setInterval(() => { void getListenerStatus().then(setListenerStatus).catch(() => setListenerStatus(null)); },25000);
+  let refreshVersion = 0;
+  const refreshTikTok = async () => {
+   const version = ++refreshVersion;
+   try {
+    const [status,pending] = await Promise.all([getTikTokConnection(),getTikTokPending()]);
+    if(version === refreshVersion) { setConnection(status); setTikTokPending(pending); }
+   } catch { if(version === refreshVersion) setConnection(null); }
+  };
+  const tiktokInterval = window.setInterval(() => { void refreshTikTok(); }, 3000);
   const unlock = () => unlockNotificationAudio();
   window.addEventListener("pointerdown",unlock,{once:true}); window.addEventListener("keydown",unlock,{once:true});
   const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? API_URL,{transports:["websocket","polling"],reconnection:true});
@@ -80,9 +88,11 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   socket.on("queue:deleted",(event:QueueEvent)=>applyQueueEvent(event));
   socket.on("queue:reordered",(event:QueueEvent)=>applyQueueEvent(event));
   socket.on("settings:updated",(event:SettingsEvent)=>{setRules(event.rules);setSettings(event.settings);});
+  socket.on("tiktok:pending-changed", () => { void refreshTikTok(); });
+  socket.on("tiktok:status-changed", () => { void refreshTikTok(); });
   socket.on("connect",()=>{if(readyRef.current) void reload().catch(loadError=>setError((loadError as Error).message));});
   const initialLoad = window.setTimeout(()=>{void reload().catch(loadError=>{setError((loadError as Error).message);setReady(true);readyRef.current=true;});},0);
-  return ()=>{window.clearInterval(interval);window.clearInterval(listenerStatusInterval);window.clearTimeout(initialLoad);window.removeEventListener("pointerdown",unlock);window.removeEventListener("keydown",unlock);socket.removeAllListeners();socket.close();};
+  return ()=>{window.clearInterval(interval);refreshVersion++;window.clearInterval(tiktokInterval);window.clearTimeout(initialLoad);window.removeEventListener("pointerdown",unlock);window.removeEventListener("keydown",unlock);socket.removeAllListeners();socket.close();};
  },[]);
 
  const commitSettings = async (nextRules:GiftRule[],nextSettings:QueueSettings) => runAction("กำลังบันทึกการตั้งค่า", async () => {
@@ -90,6 +100,6 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   setRules(snapshot.rules); setSettings(snapshot.settings); await reload();
  });
  const activeAction = pendingActions[pendingActions.length - 1];
- return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,runAction,reload,live,setLive,liveStarted,setLiveStarted,listenerStatus}}>{children}{activeAction&&<div className="action-status" role="status" aria-live="polite"><span className="action-status-mark">✦</span><span>{activeAction.label}</span><span className="action-status-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>}</Context.Provider>;
+ return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,runAction,reload,connection,setConnection,tiktokPending}}>{children}{activeAction&&<div className="action-status" role="status" aria-live="polite"><span className="action-status-mark">✦</span><span>{activeAction.label}</span><span className="action-status-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>}</Context.Provider>;
 }
 export function useLiveQueue(){const store=useContext(Context);if(!store)throw new Error("LiveQueueProvider is required");return store;}

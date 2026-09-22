@@ -10,9 +10,10 @@ loadDotenv({ path: fileURLToPath(new URL("../../apps/api/.env.local", import.met
 
 async function migrate() {
   const pool = createPool();
+  const client = await pool.connect();
   try {
-    await pool.query("BEGIN");
-    await pool.query(`
+    await client.query("BEGIN");
+    await client.query(`
       CREATE TABLE IF NOT EXISTS app_migrations (
         filename text PRIMARY KEY,
         applied_at timestamptz NOT NULL DEFAULT now()
@@ -24,19 +25,20 @@ async function migrate() {
       .sort();
 
     for (const filename of filenames) {
-      const existing = await pool.query("SELECT 1 FROM app_migrations WHERE filename = $1", [filename]);
+      const existing = await client.query("SELECT 1 FROM app_migrations WHERE filename = $1", [filename]);
       if (existing.rowCount) continue;
       const sql = await readFile(join(migrationDirectory, filename), "utf8");
-      await pool.query(sql);
-      await pool.query("INSERT INTO app_migrations (filename) VALUES ($1)", [filename]);
+      await client.query(sql);
+      await client.query("INSERT INTO app_migrations (filename) VALUES ($1)", [filename]);
       console.log(`Applied ${filename}`);
     }
 
-    await pool.query("COMMIT");
+    await client.query("COMMIT");
   } catch (error) {
-    await pool.query("ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
+    client.release();
     await closePool(pool);
   }
 }

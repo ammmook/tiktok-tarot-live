@@ -29,6 +29,7 @@ async function lockTikTokUser(tx: Transaction, liveSessionId: string, userId: st
 }
 
 async function resolveLiveSession(tx: Transaction, username: string, roomId: string, now: Date) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`tiktok-room:${roomId}`}, 0))`);
   const [existing] = await tx.select().from(liveSessions).where(eq(liveSessions.roomId, roomId)).limit(1);
   if (existing) {
     if (existing.status !== "CONNECTED") {
@@ -175,6 +176,10 @@ function giftRuleSnapshot(rule: GiftRuleDto, event: Extract<TikTokEventInput, { 
 }
 
 export async function processTikTokEvent(db: Database, input: TikTokEventInput, ttlMinutes: number) {
+  // Do not claim the streak's idempotency key until its final count arrives.
+  if (input.type === "gift" && input.gift.giftType === 1 && !input.gift.repeatEnd) {
+    return { replayed: false, mutations: [] as QueueMutationResult[], disposition: "streak_in_progress" };
+  }
   return db.transaction(async (tx) => {
     const now = new Date();
     await expireWithinTransaction(tx, now);
@@ -219,7 +224,11 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
       await updateReceipt(tx, receipt.id, "IGNORED_STREAK_IN_PROGRESS", now);
       return { replayed: false, mutations: [] as QueueMutationResult[], disposition: "streak_in_progress" };
     }
-    const [ruleRow] = await tx.select().from(giftRules).where(eq(giftRules.giftCode, input.gift.giftId.toLowerCase())).limit(1);
+    // Numeric IDs are exact; named codes keep existing dashboard rules usable.
+    const giftCode = input.gift.giftName.trim().toLowerCase().replace(/\s+/g, "-");
+    const availableRules = await tx.select().from(giftRules);
+    const ruleRow = availableRules.find(rule => rule.giftCode === input.gift.giftId.toLowerCase())
+      ?? availableRules.find(rule => rule.giftCode === giftCode);
     const rule = ruleRow ? toGiftRuleDto(ruleRow as unknown as Record<string, unknown>) : null;
     if (!rule || !rule.active || input.gift.repeatCount < rule.minimumGiftCount) {
       await updateReceipt(tx, receipt.id, "IGNORED_GIFT", now);
@@ -297,10 +306,33 @@ export async function reportListenerStatus(db: Database, input: ListenerStatusIn
   });
 }
 
-export async function getLatestListenerStatus(db: Database) {
-  const [row] = await db.select().from(listenerHealth).orderBy(sql`${listenerHealth.updatedAt} desc`).limit(1);
+export async function getLatestListenerStatus(db: Database, instanceId?: string) {
+  const [row] = await db.select().from(listenerHealth).where(instanceId ? eq(listenerHealth.instanceId, instanceId) : undefined).orderBy(sql`${listenerHealth.updatedAt} desc`).limit(1);
   if (!row) return { status: "OFFLINE", tiktokStatus: "OFFLINE", authenticationStatus: "missing", roomId: null, lastEventAt: null, updatedAt: null };
   const stale = Date.now() - row.updatedAt.getTime() > 65_000;
   if (stale) return { ...row, status: "OFFLINE", tiktokStatus: "BACKEND_UNREACHABLE" };
   return row;
+}
+
+export async function getTikTokPending(db: Database) {
+  const now = new Date();
+  const [questions, credits] = await Promise.all([
+    db.select().from(pendingQuestions).where(and(eq(pendingQuestions.status, "WAITING_FOR_GIFT"), gt(pendingQuestions.expiresAt, now))),
+    db.select().from(questionCredits).where(and(eq(questionCredits.source, "tiktok"), eq(questionCredits.status, "WAITING_FOR_QUESTION"), gt(questionCredits.expiresAt, now))),
+  ]);
+  return [
+    ...questions.map(q => ({ id: q.id, kind: "question" as const, status: "waiting_for_gift" as const,
+      displayName: q.displayName, tiktokUsername: q.username, tiktokNickname: q.nickname,
+      profilePictureUrl: q.profilePictureUrl, question: q.question, roomId: q.roomId,
+      giftName: null, giftImageUrl: null, giftIcon: null, giftCount: 0, remainingQuestions: 0 as number | null,
+      createdAt: q.createdAt.getTime(), expiresAt: q.expiresAt.getTime(),
+    })),
+    ...credits.map(c => ({ id: c.id, kind: "gift" as const, status: "waiting_for_question" as const,
+      displayName: c.displayName, tiktokUsername: c.username, tiktokNickname: c.nickname,
+      profilePictureUrl: c.profilePictureUrl, question: "", roomId: c.roomId,
+      giftName: c.giftName, giftImageUrl: c.giftImageUrl, giftIcon: c.giftIcon,
+      giftCount: c.giftCount, remainingQuestions: c.remainingQuestions,
+      createdAt: c.createdAt.getTime(), expiresAt: c.expiresAt!.getTime(),
+    })),
+  ].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }

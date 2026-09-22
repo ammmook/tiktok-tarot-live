@@ -9,7 +9,7 @@
     "start": "node dist/src/server.js",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test"
+    "test": "node --import tsx --test tests/*.test.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",
@@ -24,6 +24,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^20",
     "eslint": "^9",
     "tsx": "^4.19.0",

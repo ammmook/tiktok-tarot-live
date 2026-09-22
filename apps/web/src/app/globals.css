@@ -226,3 +226,17 @@ dialog::backdrop { animation: backdrop-in .28s ease both; }
  *,*::before,*::after { animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; scroll-behavior:auto!important; }
 }
 .current-rights { margin-left:8px; }
+.tiktok-connect-panel { display:grid; grid-template-columns:1fr 1fr; gap:16px 28px; padding:24px; margin-bottom:24px; border:1px solid var(--color-border); border-radius:16px; background:var(--color-panel); }
+.tiktok-connect-panel h2 { font-size:18px; margin:0 0 6px; }
+.tiktok-connect-panel p { font-size:13px; color:var(--color-muted); margin:0; }
+.tiktok-connect-panel form label { display:block; font-size:12px; margin-bottom:8px; }
+.tiktok-connect-controls { display:flex; gap:8px; }
+.tiktok-connect-controls input { min-width:0; flex:1; width:100%; padding:10px 12px; background:transparent; color:inherit; border:1px solid var(--color-border); border-radius:8px; }
+.tiktok-connection-detail { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; grid-column:1/-1; }
+.tiktok-connection-detail small { overflow-wrap:anywhere; }
+.tiktok-flow-hint,.tiktok-connect-panel .form-error { grid-column:1/-1; }
+.tiktok-nickname { display:block; font-size:12px; font-weight:400; color:var(--color-muted); overflow-wrap:anywhere; }
+.gift-image { width:24px; height:24px; object-fit:contain; vertical-align:middle; }
+.manual-tools { margin-top:24px; }
+.manual-tools > summary { cursor:pointer; color:var(--color-muted); font-size:13px; }
+@media(max-width:760px) { .tiktok-connect-panel { grid-template-columns:1fr; padding:18px; } .tiktok-connect-controls { flex-wrap:wrap; } .tiktok-connect-controls input { flex-basis:100%; } }

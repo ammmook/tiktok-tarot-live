@@ -13,6 +13,21 @@ export type ListenerStatus = {
  updatedAt: string | null;
 };
 
+export type TikTokConnection = Omit<ListenerStatus, "authenticationStatus"> & {
+ username: string | null; revision: string; listenerOnline: boolean; detail: string | null;
+};
+export type TikTokPending = {
+ id: string; kind: "question" | "gift"; status: "waiting_for_gift" | "waiting_for_question";
+ displayName: string; tiktokUsername: string; tiktokNickname: string | null;
+ profilePictureUrl: string | null; question: string; roomId: string | null;
+ giftName: string | null; giftImageUrl: string | null; giftIcon: string | null;
+ giftCount: number; remainingQuestions: number | null; createdAt: number; expiresAt: number;
+};
+export const getTikTokConnection = async () => (await request<TikTokConnection>("/api/tiktok/connection")).data;
+export const connectTikTok = async (username: string) => (await request<TikTokConnection>("/api/tiktok/connect", { method: "POST", body: JSON.stringify({ username }) })).data;
+export const disconnectTikTok = async () => (await request<TikTokConnection>("/api/tiktok/disconnect", { method: "POST" })).data;
+export const getTikTokPending = async () => (await request<TikTokPending[]>("/api/tiktok/pending")).data;
+
 async function request<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,

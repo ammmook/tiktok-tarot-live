@@ -51,6 +51,7 @@ export async function enqueueQuestionFromTikTok(config: ListenerConfig, event: Q
 }
 
 export class ListenerBackendClient {
+  private closed = false;
   private readonly queue: OutboundRequest[] = [];
   private processing = false;
   private retryTimer: NodeJS.Timeout | undefined;
@@ -69,6 +70,7 @@ export class ListenerBackendClient {
   }
 
   private enqueue(request: OutboundRequest) {
+    if (this.closed) return;
     if (this.queue.length >= this.capacity) {
       this.onStateChange(false, "Outbound retry buffer is full");
       console.error("Listener retry buffer is full; dropping newest outbound message");
@@ -79,10 +81,10 @@ export class ListenerBackendClient {
   }
 
   private async drain() {
-    if (this.processing) return;
+    if (this.processing || this.closed) return;
     this.processing = true;
     try {
-      while (this.queue.length) {
+      while (this.queue.length && !this.closed) {
         const current = this.queue[0];
         try {
           const response = await fetch(`${this.config.apiBaseUrl.replace(/\/$/, "")}${current.path}`, {
@@ -101,6 +103,7 @@ export class ListenerBackendClient {
           this.queue.shift();
           this.onStateChange(true);
         } catch (error) {
+          if (this.closed) return;
           current.attempts += 1;
           this.onStateChange(false, error instanceof Error ? error.message : "Backend request failed");
           const wait = delayForAttempt(current.attempts - 1);
@@ -123,5 +126,12 @@ export class ListenerBackendClient {
     while ((this.processing || this.queue.length) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+  }
+
+  close() {
+    this.closed = true;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.queue.length = 0;
   }
 }

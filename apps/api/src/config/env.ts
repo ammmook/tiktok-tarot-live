@@ -13,6 +13,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().max(50).default(10),
   LISTENER_API_KEY: z.string().min(16).optional(),
+  LISTENER_SECRET: z.string().min(16).optional(),
   QUEUE_API_SECRET: z.string().min(16).optional(),
   QUESTION_GIFT_MATCH_TTL_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
   PENDING_EXPIRY_SWEEP_SECONDS: z.coerce.number().int().min(10).max(300).default(30),
@@ -29,6 +30,6 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...result.data,
     frontendOrigins: result.data.FRONTEND_URL.split(",").map((origin) => origin.trim()).filter(Boolean),
-    listenerApiKey: result.data.LISTENER_API_KEY ?? result.data.QUEUE_API_SECRET,
+    listenerApiKey: result.data.LISTENER_API_KEY ?? result.data.LISTENER_SECRET ?? result.data.QUEUE_API_SECRET,
   };
 }
