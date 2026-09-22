@@ -2,5 +2,6 @@ packages:
   - apps/*
   - packages/*
 allowBuilds:
+  bufferutil: false
   esbuild: true
   unrs-resolver: true
