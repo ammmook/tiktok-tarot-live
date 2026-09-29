@@ -17,6 +17,7 @@ const envSchema = z.object({
   QUEUE_API_SECRET: z.string().min(16).optional(),
   QUESTION_GIFT_MATCH_TTL_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
   PENDING_EXPIRY_SWEEP_SECONDS: z.coerce.number().int().min(10).max(300).default(30),
+  LIVE_DATA_RETENTION_SWEEP_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
 });
 
 export type AppConfig = z.infer<typeof envSchema> & { frontendOrigins: string[]; listenerApiKey?: string };

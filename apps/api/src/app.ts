@@ -10,7 +10,7 @@ import { registerIngestRoutes } from "./routes/ingest.js";
 import { registerQueueRoutes } from "./routes/queue.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerTikTokRoutes } from "./routes/tiktok.js";
-import { expireTikTokPending } from "./modules/tiktok/service.js";
+import { expireTikTokPending, purgeStaleLiveQueueData } from "./modules/tiktok/service.js";
 import { TikTokControl } from "./modules/tiktok/control.js";
 import { createSocketServer } from "./socket/index.js";
 
@@ -38,6 +38,11 @@ export async function buildApp(config: AppConfig = loadConfig()) {
   }, config.PENDING_EXPIRY_SWEEP_SECONDS * 1_000);
   void expireTikTokPending(db).catch((error) => app.log.error(error, "Initial TikTok pending-item expiry sweep failed"));
 
+  const retentionTimer = setInterval(() => {
+    void purgeStaleLiveQueueData(db).catch((error) => app.log.error(error, "Live queue retention sweep failed"));
+  }, config.LIVE_DATA_RETENTION_SWEEP_SECONDS * 1_000);
+  void purgeStaleLiveQueueData(db).catch((error) => app.log.error(error, "Initial live queue retention sweep failed"));
+
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Invalid request", details: error.issues } });
@@ -60,6 +65,7 @@ export async function buildApp(config: AppConfig = loadConfig()) {
 
   app.addHook("onClose", async () => {
     clearInterval(pendingExpiryTimer);
+    clearInterval(retentionTimer);
     io.close();
     await closePool(pool);
   });
