@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerTikTokRoutes } from "../src/routes/tiktok.ts";
-import { processTikTokEvent, getTikTokActivity, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
+import { processTikTokEvent, getTikTokActivity, getTikTokPending, purgeStaleLiveQueueData, reportListenerStatus } from "../src/modules/tiktok/service.ts";
 import { createQueue, startQueue, completeQueue, restoreQueue, updateQueue, getSettingsSnapshot, updateSettings } from "../src/modules/queue/service.ts";
 import { listActive } from "../src/modules/queue/repository.ts";
 import { AppError } from "../src/errors/app-error.ts";
@@ -14,7 +14,7 @@ import { AppError } from "../src/errors/app-error.ts";
 let client, db;
 before(async () => {
     client = new PGlite();
-    for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql", "0004_tiktok_account_settings.sql", "0007_tiktok_activity_catalog.sql", "0008_tiktok_gift_log.sql"]) {
+    for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql", "0004_tiktok_account_settings.sql", "0007_tiktok_activity_catalog.sql", "0008_tiktok_gift_log.sql", "0009_hard_one_day_live_data_retention.sql"]) {
         const sql = await readFile(new URL(`../../../packages/db/migrations/${name}`, import.meta.url), "utf8");
         // PGlite provides gen_random_uuid natively; pgcrypto is not bundled.
         await client.exec(sql.replace("CREATE EXTENSION IF NOT EXISTS pgcrypto;", ""));
@@ -166,4 +166,21 @@ test("gift rules and queue settings are isolated by TikTok account", async () =>
     await processTikTokEvent(db, accountGift, 10);
     const result = await processTikTokEvent(db, accountChat, 10);
     assert.equal(result.mutations[0].entry.giftPriority, 7);
+});
+
+test("retention purges every LIVE question and gift log after one day", async () => {
+    const roomId = `retention-${Date.now()}`;
+    await processTikTokEvent(db, gift(`retention-gift-${roomId}`, "retention", roomId), 10);
+    await processTikTokEvent(db, chat(`retention-chat-${roomId}`, "retention", roomId), 10);
+
+    for (const table of ["queue_entries", "question_credits", "pending_questions", "tiktok_processed_events", "tiktok_live_comments", "tiktok_live_gifts"]) {
+        await client.exec(`UPDATE ${table} SET created_at = now() - interval '2 days' WHERE room_id = '${roomId}'`);
+    }
+
+    await purgeStaleLiveQueueData(db);
+
+    for (const table of ["queue_entries", "question_credits", "pending_questions", "tiktok_processed_events", "tiktok_live_comments", "tiktok_live_gifts"]) {
+        const result = await client.query(`SELECT count(*)::int AS count FROM ${table} WHERE room_id = '${roomId}'`);
+        assert.equal(result.rows[0].count, 0, `${table} should be purged after one day`);
+    }
 });

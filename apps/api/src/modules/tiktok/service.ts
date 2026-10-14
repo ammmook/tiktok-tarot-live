@@ -66,7 +66,7 @@ export async function expireTikTokPending(db: Database) {
   });
 }
 
-/** Deletes queue data older than one day through the database retention function. */
+/** Deletes all LIVE questions, event receipts, comments, and gifts older than one day. */
 export async function purgeStaleLiveQueueData(db: Database) {
   await db.execute(sql`SELECT public.purge_stale_live_queue_data()`);
 }
