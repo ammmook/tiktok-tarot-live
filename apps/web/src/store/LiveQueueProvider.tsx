@@ -5,7 +5,7 @@ import { io } from "socket.io-client";
 import type { GiftRule, QueueEntry, QueueSettings } from "@/types/queue";
 import { defaultGiftRules, defaultQueueSettings } from "@/data/defaultRules";
 import { API_URL, getHistory, getQueue, getSettings, updateSettings } from "@/lib/api";
-import { getTikTokConnection, getTikTokPending, type TikTokConnection, type TikTokPending } from "@/lib/api";
+import { getTikTokActivity, getTikTokConnection, getTikTokPending, type TikTokActivity, type TikTokConnection, type TikTokPending } from "@/lib/api";
 import { playNewQueueSound, unlockNotificationAudio } from "@/lib/notificationSound";
 
 type QueueEvent = { eventId: string; entry?: QueueEntry; relatedEntries?: QueueEntry[]; queueOrder?: string[] };
@@ -19,6 +19,7 @@ interface Store {
  reload: () => Promise<void>;
  connection: TikTokConnection | null; setConnection: Dispatch<SetStateAction<TikTokConnection | null>>;
  tiktokPending: TikTokPending[];
+ tiktokActivity: TikTokActivity;
 }
 const Context = createContext<Store | null>(null);
 
@@ -41,6 +42,7 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  const [error,setError] = useState("");
  const [connection,setConnection] = useState<TikTokConnection | null>(null);
  const [tiktokPending,setTikTokPending] = useState<TikTokPending[]>([]);
+ const [tiktokActivity,setTikTokActivity] = useState<TikTokActivity>({ comments: [], gifts: [], recentGifts: [] });
  const [pendingActions,setPendingActions] = useState<{id:number;label:string}[]>([]);
  const actionId = useRef(0);
  const seenCreationEvents = useRef(new Set<string>());
@@ -59,8 +61,9 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
  };
 
  const reload = async () => {
-  const [snapshot,active,history,pending] = await Promise.all([getSettings(),getQueue(),getHistory(),getTikTokPending()]);
+  const [snapshot,active,history,pending,activity] = await Promise.all([getSettings(),getQueue(),getHistory(),getTikTokPending(),getTikTokActivity()]);
   applyTikTokPending(pending);
+  setTikTokActivity(activity);
   setRules(snapshot.rules); setSettings(snapshot.settings); setEntries(mergeEntries([], [...active,...history])); setError(""); setReady(true); readyRef.current=true;
   void getTikTokConnection().then(setConnection).catch(() => setConnection(null));
  };
@@ -78,8 +81,8 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   const refreshTikTok = async () => {
    const version = ++refreshVersion;
    try {
-    const [status,pending] = await Promise.all([getTikTokConnection(),getTikTokPending()]);
-    if(version === refreshVersion) { setConnection(status); applyTikTokPending(pending, true); }
+    const [status,pending,activity] = await Promise.all([getTikTokConnection(),getTikTokPending(),getTikTokActivity()]);
+    if(version === refreshVersion) { setConnection(status); applyTikTokPending(pending, true); setTikTokActivity(activity); }
    } catch { if(version === refreshVersion) setConnection(null); }
   };
   const tiktokInterval = window.setInterval(() => { void refreshTikTok(); }, 3000);
@@ -100,6 +103,7 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   socket.on("queue:reordered",(event:QueueEvent)=>applyQueueEvent(event));
   socket.on("settings:updated",(event:SettingsEvent)=>{if(!event.username || event.username === connectionRef.current?.username){setRules(event.rules);setSettings(event.settings);}});
   socket.on("tiktok:pending-changed", () => { void refreshTikTok(); });
+  socket.on("tiktok:activity-changed", () => { void refreshTikTok(); });
   socket.on("tiktok:status-changed", () => { void refreshTikTok(); });
   socket.on("connect",()=>{if(readyRef.current) void reload().catch(loadError=>setError((loadError as Error).message));});
   const initialLoad = window.setTimeout(()=>{void reload().catch(loadError=>{setError((loadError as Error).message);setReady(true);readyRef.current=true;});},0);
@@ -111,6 +115,7 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   if (connection?.username) return;
   setEntries([]);
   setTikTokPending([]);
+  setTikTokActivity({ comments: [], gifts: [], recentGifts: [] });
   seenPendingEntries.current.clear();
  }, [connection?.username]);
 
@@ -119,6 +124,6 @@ export function LiveQueueProvider({children}: {children: React.ReactNode}) {
   setRules(snapshot.rules); setSettings(snapshot.settings); await reload();
  });
  const activeAction = pendingActions[pendingActions.length - 1];
- return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,runAction,reload,connection,setConnection,tiktokPending}}>{children}{activeAction&&<div className="action-status" role="status" aria-live="polite"><span className="action-status-mark">✦</span><span>{activeAction.label}</span><span className="action-status-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>}</Context.Provider>;
+ return <Context.Provider value={{rules,settings,entries,setEntries,now,ready,error,commitSettings,runAction,reload,connection,setConnection,tiktokPending,tiktokActivity}}>{children}{activeAction&&<div className="action-status" role="status" aria-live="polite"><span className="action-status-mark">✦</span><span>{activeAction.label}</span><span className="action-status-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>}</Context.Provider>;
 }
 export function useLiveQueue(){const store=useContext(Context);if(!store)throw new Error("LiveQueueProvider is required");return store;}

@@ -23,10 +23,21 @@ export type TikTokPending = {
  giftName: string | null; giftImageUrl: string | null; giftIcon: string | null;
  giftCount: number; remainingQuestions: number | null; createdAt: number; expiresAt: number;
 };
+export type TikTokCommentActivity = {
+ id: string; username: string; nickname: string; profilePictureUrl: string | null; comment: string; createdAt: number;
+};
+export type TikTokKnownGift = {
+ id: string; giftId: string; giftName: string; giftImageUrl: string | null; diamondCount: number | null; receivedCount: number; lastSeenAt: number;
+};
+export type TikTokGiftActivity = {
+ id: string; username: string; nickname: string; profilePictureUrl: string | null; giftId: string; giftName: string; giftImageUrl: string | null; diamondCount: number | null; giftCount: number; createdAt: number;
+};
+export type TikTokActivity = { comments: TikTokCommentActivity[]; gifts: TikTokKnownGift[]; recentGifts: TikTokGiftActivity[] };
 export const getTikTokConnection = async () => (await request<TikTokConnection>("/api/tiktok/connection")).data;
 export const connectTikTok = async (username: string) => (await request<TikTokConnection>("/api/tiktok/connect", { method: "POST", body: JSON.stringify({ username }) })).data;
 export const disconnectTikTok = async () => (await request<TikTokConnection>("/api/tiktok/disconnect", { method: "POST" })).data;
 export const getTikTokPending = async () => (await request<TikTokPending[]>("/api/tiktok/pending")).data;
+export const getTikTokActivity = async () => (await request<TikTokActivity>("/api/tiktok/activity")).data;
 
 async function request<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const response = await fetch(`${API_URL}${path}`, {

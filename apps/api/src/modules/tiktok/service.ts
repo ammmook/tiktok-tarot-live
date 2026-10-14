@@ -1,6 +1,6 @@
-import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Database } from "@tarot-live/db";
-import { listenerHealth, liveSessions, pendingQuestions, questionCredits, queueEntries, tiktokProcessedEvents } from "@tarot-live/db/schema";
+import { listenerHealth, liveSessions, pendingQuestions, questionCredits, queueEntries, tiktokKnownGifts, tiktokLiveComments, tiktokLiveGifts, tiktokProcessedEvents } from "@tarot-live/db/schema";
 import { calculateRights, storedUsername } from "../queue/rules.js";
 import { activeStatuses, ensureAccountSettings, getGiftRules, queueOrder, recordEvent } from "../queue/repository.js";
 import { toQueueEntryDto } from "../queue/mapping.js";
@@ -180,6 +180,50 @@ function giftRuleSnapshot(rule: GiftRuleDto, event: Extract<TikTokEventInput, { 
   };
 }
 
+async function rememberGift(tx: Transaction, input: Extract<TikTokEventInput, { type: "gift" }>, now: Date) {
+  const username = storedUsername(input.liveUsername);
+  await tx.insert(tiktokKnownGifts).values({
+    tiktokUsername: username,
+    giftId: input.gift.giftId,
+    giftName: input.gift.giftName || "Gift",
+    giftImageUrl: input.gift.imageUrl ?? null,
+    diamondCount: input.gift.diamondCount ?? null,
+    receivedCount: input.gift.repeatCount,
+    firstSeenAt: now,
+    lastSeenAt: now,
+  }).onConflictDoUpdate({
+    target: [tiktokKnownGifts.tiktokUsername, tiktokKnownGifts.giftId],
+    set: {
+      giftName: input.gift.giftName || "Gift",
+      giftImageUrl: input.gift.imageUrl ?? null,
+      diamondCount: input.gift.diamondCount ?? null,
+      receivedCount: sql`${tiktokKnownGifts.receivedCount} + ${input.gift.repeatCount}`,
+      lastSeenAt: now,
+    },
+  });
+}
+
+async function recordLiveGift(tx: Transaction, liveSessionId: string, input: Extract<TikTokEventInput, { type: "gift" }>, now: Date) {
+  await tx.insert(tiktokLiveGifts).values({
+    liveSessionId,
+    roomId: input.roomId,
+    eventKey: eventKey(input),
+    eventId: input.eventId,
+    userId: input.user.userId,
+    secUid: input.user.secUid ?? null,
+    username: storedUsername(input.user.username),
+    nickname: input.user.nickname || input.user.username,
+    profilePictureUrl: input.user.profilePictureUrl ?? null,
+    giftId: input.gift.giftId,
+    giftName: input.gift.giftName || "Gift",
+    giftImageUrl: input.gift.imageUrl ?? null,
+    diamondCount: input.gift.diamondCount ?? null,
+    giftCount: input.gift.repeatCount,
+    eventTimestamp: new Date(input.timestamp),
+    createdAt: now,
+  });
+}
+
 export async function processTikTokEvent(db: Database, input: TikTokEventInput, ttlMinutes: number) {
   // Do not claim the streak's idempotency key until its final count arrives.
   if (input.type === "gift" && input.gift.giftType === 1 && !input.gift.repeatEnd) {
@@ -198,6 +242,20 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
 
     await lockTikTokUser(tx, session.id, input.user.userId);
     if (input.type === "chat") {
+      await tx.insert(tiktokLiveComments).values({
+        liveSessionId: session.id,
+        roomId: input.roomId,
+        eventKey: eventKey(input),
+        eventId: input.eventId,
+        userId: input.user.userId,
+        secUid: input.user.secUid ?? null,
+        username: storedUsername(input.user.username),
+        nickname: input.user.nickname || input.user.username,
+        profilePictureUrl: input.user.profilePictureUrl ?? null,
+        comment: input.comment,
+        eventTimestamp: new Date(input.timestamp),
+        createdAt: now,
+      });
       const parsed = parseQuestionComment(input.comment);
       if (!parsed) {
         await updateReceipt(tx, receipt.id, "IGNORED_INVALID_QUESTION", now);
@@ -230,6 +288,8 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
       await updateReceipt(tx, receipt.id, "IGNORED_STREAK_IN_PROGRESS", now);
       return { replayed: false, mutations: [] as QueueMutationResult[], disposition: "streak_in_progress" };
     }
+    await recordLiveGift(tx, session.id, input, now);
+    await rememberGift(tx, input, now);
     // Numeric IDs are exact; named codes keep existing dashboard rules usable.
     const giftCode = input.gift.giftName.trim().toLowerCase().replace(/\s+/g, "-");
     const availableRules = await getGiftRules(tx as unknown as Database, input.liveUsername);
@@ -276,6 +336,86 @@ export async function processTikTokEvent(db: Database, input: TikTokEventInput, 
     await updateReceipt(tx, receipt.id, entries.length ? "MATCHED" : "WAITING_FOR_QUESTION", now);
     return { replayed: false, mutations: await mutationsFor(tx, entries), disposition: entries.length ? "matched" : "waiting_for_question" };
   });
+}
+
+export type TikTokCommentActivity = {
+  id: string;
+  username: string;
+  nickname: string;
+  profilePictureUrl: string | null;
+  comment: string;
+  createdAt: number;
+};
+
+export type TikTokKnownGift = {
+  id: string;
+  giftId: string;
+  giftName: string;
+  giftImageUrl: string | null;
+  diamondCount: number | null;
+  receivedCount: number;
+  lastSeenAt: number;
+};
+
+export type TikTokGiftActivity = {
+  id: string;
+  username: string;
+  nickname: string;
+  profilePictureUrl: string | null;
+  giftId: string;
+  giftName: string;
+  giftImageUrl: string | null;
+  diamondCount: number | null;
+  giftCount: number;
+  createdAt: number;
+};
+
+export async function getTikTokActivity(db: Database, liveUsername?: string | null, limit = 40) {
+  if (!liveUsername) return { comments: [] as TikTokCommentActivity[], gifts: [] as TikTokKnownGift[], recentGifts: [] as TikTokGiftActivity[] };
+  const username = storedUsername(liveUsername);
+  const sessions = await db.select({ id: liveSessions.id }).from(liveSessions)
+    .where(eq(liveSessions.tiktokUsername, username));
+  const sessionIds = sessions.map((session) => session.id);
+  const [comments, gifts, recentGifts] = await Promise.all([
+    sessionIds.length
+      ? db.select().from(tiktokLiveComments).where(inArray(tiktokLiveComments.liveSessionId, sessionIds)).orderBy(desc(tiktokLiveComments.createdAt)).limit(limit)
+      : Promise.resolve([]),
+    db.select().from(tiktokKnownGifts).where(eq(tiktokKnownGifts.tiktokUsername, username)).orderBy(desc(tiktokKnownGifts.lastSeenAt)).limit(200),
+    sessionIds.length
+      ? db.select().from(tiktokLiveGifts).where(inArray(tiktokLiveGifts.liveSessionId, sessionIds)).orderBy(desc(tiktokLiveGifts.createdAt)).limit(limit)
+      : Promise.resolve([]),
+  ]);
+  return {
+    comments: comments.map((comment) => ({
+      id: comment.id,
+      username: comment.username,
+      nickname: comment.nickname,
+      profilePictureUrl: comment.profilePictureUrl,
+      comment: comment.comment,
+      createdAt: comment.createdAt.getTime(),
+    })),
+    gifts: gifts.map((gift) => ({
+      id: gift.id,
+      giftId: gift.giftId,
+      giftName: gift.giftName,
+      giftImageUrl: gift.giftImageUrl,
+      diamondCount: gift.diamondCount,
+      receivedCount: gift.receivedCount,
+      lastSeenAt: gift.lastSeenAt.getTime(),
+    })),
+    recentGifts: recentGifts.map((gift) => ({
+      id: gift.id,
+      username: gift.username,
+      nickname: gift.nickname,
+      profilePictureUrl: gift.profilePictureUrl,
+      giftId: gift.giftId,
+      giftName: gift.giftName,
+      giftImageUrl: gift.giftImageUrl,
+      diamondCount: gift.diamondCount,
+      giftCount: gift.giftCount,
+      createdAt: gift.createdAt.getTime(),
+    })),
+  };
 }
 
 async function endLiveSession(tx: Transaction, roomId: string, now: Date) {

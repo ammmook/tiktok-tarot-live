@@ -5,7 +5,7 @@ import { assertListenerApiKey } from "../auth/api-key.js";
 import type { AppConfig } from "../config/env.js";
 import { emitQueueMutation } from "../socket/index.js";
 import { listenerStatusSchema, tiktokEventSchema } from "../modules/tiktok/schemas.js";
-import { getLatestListenerStatus, getTikTokPending, processTikTokEvent, reportListenerStatus } from "../modules/tiktok/service.js";
+import { getLatestListenerStatus, getTikTokActivity, getTikTokPending, processTikTokEvent, reportListenerStatus } from "../modules/tiktok/service.js";
 import { ensureAccountSettings } from "../modules/queue/repository.js";
 import { connectTikTokSchema, TikTokControl } from "../modules/tiktok/control.js";
 import { AppError } from "../errors/app-error.js";
@@ -41,12 +41,14 @@ export async function registerTikTokRoutes(app: FastifyInstance, options: { db: 
     return { data: await connectionStatus() };
   });
   app.get("/api/tiktok/pending", async () => ({ data: await getTikTokPending(options.db, control.read().username) }));
+  app.get("/api/tiktok/activity", async () => ({ data: await getTikTokActivity(options.db, control.read().username) }));
   app.post("/internal/tiktok/events", async (request) => {
     assertListenerApiKey(options.config, request.headers.authorization, request.headers["x-listener-key"] as string | undefined);
     const input = tiktokEventSchema.parse(request.body);
     const result = await processTikTokEvent(options.db, input, options.config.QUESTION_GIFT_MATCH_TTL_MINUTES);
     if (!result.replayed) for (const mutation of result.mutations) emitQueueMutation(options.io, mutation);
     if (!result.replayed) options.io.emit("tiktok:pending-changed");
+    if (!result.replayed) options.io.emit("tiktok:activity-changed");
     return { data: { replayed: result.replayed, disposition: result.disposition, created: result.mutations.length } };
   });
 

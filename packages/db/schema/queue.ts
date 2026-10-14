@@ -132,6 +132,78 @@ export const tiktokProcessedEvents = pgTable(
   }),
 );
 
+/** Every chat received during a LIVE, including messages that are not queue questions. */
+export const tiktokLiveComments = pgTable(
+  "tiktok_live_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    liveSessionId: uuid("live_session_id").notNull().references(() => liveSessions.id),
+    roomId: varchar("room_id", { length: 120 }).notNull(),
+    eventKey: varchar("event_key", { length: 480 }).notNull(),
+    eventId: varchar("event_id", { length: 180 }).notNull(),
+    userId: varchar("user_id", { length: 120 }).notNull(),
+    secUid: varchar("sec_uid", { length: 256 }),
+    username: varchar("username", { length: 120 }).notNull(),
+    nickname: varchar("nickname", { length: 120 }).notNull(),
+    profilePictureUrl: text("profile_picture_url"),
+    comment: text("comment").notNull(),
+    eventTimestamp: timestamp("event_timestamp", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    eventKeyUnique: uniqueIndex("tiktok_live_comments_event_key_uidx").on(table.eventKey),
+    sessionCreatedIndex: index("tiktok_live_comments_session_created_idx").on(table.liveSessionId, table.createdAt),
+  }),
+);
+
+/** A durable, per-send gift log for the LIVE dashboard and historical review. */
+export const tiktokLiveGifts = pgTable(
+  "tiktok_live_gifts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    liveSessionId: uuid("live_session_id").notNull().references(() => liveSessions.id),
+    roomId: varchar("room_id", { length: 120 }).notNull(),
+    eventKey: varchar("event_key", { length: 480 }).notNull(),
+    eventId: varchar("event_id", { length: 180 }).notNull(),
+    userId: varchar("user_id", { length: 120 }).notNull(),
+    secUid: varchar("sec_uid", { length: 256 }),
+    username: varchar("username", { length: 120 }).notNull(),
+    nickname: varchar("nickname", { length: 120 }).notNull(),
+    profilePictureUrl: text("profile_picture_url"),
+    giftId: varchar("gift_id", { length: 80 }).notNull(),
+    giftName: varchar("gift_name", { length: 120 }).notNull(),
+    giftImageUrl: text("gift_image_url"),
+    diamondCount: integer("diamond_count"),
+    giftCount: integer("gift_count").notNull(),
+    eventTimestamp: timestamp("event_timestamp", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    eventKeyUnique: uniqueIndex("tiktok_live_gifts_event_key_uidx").on(table.eventKey),
+    sessionCreatedIndex: index("tiktok_live_gifts_session_created_idx").on(table.liveSessionId, table.createdAt),
+  }),
+);
+
+/** Gift catalogue learned automatically from actual gifts received on each account. */
+export const tiktokKnownGifts = pgTable(
+  "tiktok_known_gifts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tiktokUsername: varchar("tiktok_username", { length: 120 }).notNull(),
+    giftId: varchar("gift_id", { length: 80 }).notNull(),
+    giftName: varchar("gift_name", { length: 120 }).notNull(),
+    giftImageUrl: text("gift_image_url"),
+    diamondCount: integer("diamond_count"),
+    receivedCount: integer("received_count").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    accountGiftUnique: uniqueIndex("tiktok_known_gifts_account_gift_uidx").on(table.tiktokUsername, table.giftId),
+    accountLastSeenIndex: index("tiktok_known_gifts_account_last_seen_idx").on(table.tiktokUsername, table.lastSeenAt),
+  }),
+);
+
 /** Valid comments wait here until a credit belonging to the same TikTok account arrives. */
 export const pendingQuestions = pgTable(
   "pending_questions",

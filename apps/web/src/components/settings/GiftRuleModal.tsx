@@ -1,17 +1,19 @@
 "use client";
 import { useState } from "react";
+import type { TikTokKnownGift } from "@/lib/api";
 import type { ColorTag, GiftRule } from "@/types/queue";
 import { Modal } from "@/components/live/QueueModal";
 import { validateGiftRule } from "@/utils/giftRules";
 import { NumberField, Toggle } from "./Fields";
 
-export default function GiftRuleModal({initial,rules,isNew,onSave,onClose}: {initial:GiftRule;rules:GiftRule[];isNew:boolean;onSave:(rule:GiftRule)=>void;onClose:()=>void}) {
+export default function GiftRuleModal({initial,rules,knownGifts,isNew,onSave,onClose}: {initial:GiftRule;rules:GiftRule[];knownGifts:TikTokKnownGift[];isNew:boolean;onSave:(rule:GiftRule)=>void;onClose:()=>void}) {
  const [draft,setDraft] = useState({...initial});
  const [error,setError] = useState("");
  const field = <K extends keyof GiftRule>(key:K,value:GiftRule[K]) => setDraft(previous=>({...previous,[key]:value}));
  return <Modal title={isNew?"เพิ่มของขวัญ":"แก้ไขกติกาของขวัญ"} onClose={onClose}><form className="gift-rule-form" onSubmit={e=>{e.preventDefault();const normalized={...draft,giftCode:draft.giftCode.trim().toLowerCase(),displayName:draft.displayName.trim(),icon:draft.icon.trim()||"🎁",isExpress:draft.queueType==="express"};const problem=validateGiftRule(normalized,rules);if(problem){setError(problem);return;}onSave(normalized);}}>
-  <p className="muted modal-intro">กำหนดสิทธิ์ให้ของขวัญชิ้นนี้ แล้วตรวจผลก่อนบันทึกการตั้งค่า</p>
-  <div className="form-pair"><label>Gift Display Name<input required value={draft.displayName} onChange={e=>field("displayName",e.target.value)} maxLength={80}/></label><label>TikTok Gift ID / Code<input required value={draft.giftCode} onChange={e=>field("giftCode",e.target.value)} maxLength={80}/><small className="field-help">ใส่ Gift ID ของ TikTok หรือชื่อภาษาอังกฤษคั่นด้วย - เช่น rose หรือ love-glasses</small></label></div>
+  <p className="muted modal-intro">เลือกจาก Gift ที่ได้รับจริง ระบบจะใส่ TikTok Gift ID ให้เอง</p>
+  <label>Gift ที่ระบบพบ<select required value={draft.giftCode} onChange={e=>{const gift=knownGifts.find(item=>item.giftId===e.target.value);field("giftCode",e.target.value);if(gift)field("displayName",gift.giftName);}}><option value="">เลือก Gift</option>{!knownGifts.some(gift=>gift.giftId===draft.giftCode)&&draft.giftCode&&<option value={draft.giftCode}>{draft.displayName} · Gift เดิม</option>}{knownGifts.map(gift=><option key={gift.id} value={gift.giftId}>{gift.giftName}{gift.diamondCount===null?"":` · ${gift.diamondCount} coins`}</option>)}</select><small className="field-help">รายการจะเพิ่มอัตโนมัติเมื่อมีผู้ส่ง Gift ใน LIVE นี้</small></label>
+  <div className="form-pair"><label>ชื่อที่แสดง<input required value={draft.displayName} onChange={e=>field("displayName",e.target.value)} maxLength={80}/></label><label>Gift ID ที่ระบบจดจำ<input value={draft.giftCode} readOnly aria-label="TikTok Gift ID"/><small className="field-help">ระบบเติมให้อัตโนมัติ ไม่ต้องกรอกเอง</small></label></div>
   <div className="form-pair"><label>Emoji / Icon<input value={draft.icon} onChange={e=>field("icon",e.target.value)} maxLength={12}/></label><label>Color Tag<select value={draft.colorTag} onChange={e=>field("colorTag",e.target.value as ColorTag)}>{["default","gold","purple","orange","pink","blue"].map(c=><option key={c} value={c}>{c[0].toUpperCase()+c.slice(1)}</option>)}</select></label></div>
   <div className="form-pair"><NumberField label="Priority" value={draft.priority} onChange={v=>field("priority",v)} help="เลข Priority ยิ่งน้อย คิวยิ่งขึ้นก่อน"/><label>ประเภทคิว<select value={draft.queueType} onChange={e=>field("queueType",e.target.value as GiftRule["queueType"])}><option value="normal">Normal · คิวปกติ</option><option value="express">Express · ลัดคิว</option></select><small className="field-help">คิวลัดขึ้นก่อนคิวปกติ ไม่แทรกคนที่กำลังตอบเมื่อเปิดการป้องกัน</small></label></div>
   <div className="form-section-title">สิทธิ์คำถาม</div>

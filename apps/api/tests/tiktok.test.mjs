@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerTikTokRoutes } from "../src/routes/tiktok.ts";
-import { processTikTokEvent, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
+import { processTikTokEvent, getTikTokActivity, getTikTokPending, reportListenerStatus } from "../src/modules/tiktok/service.ts";
 import { createQueue, startQueue, completeQueue, restoreQueue, updateQueue, getSettingsSnapshot, updateSettings } from "../src/modules/queue/service.ts";
 import { listActive } from "../src/modules/queue/repository.ts";
 import { AppError } from "../src/errors/app-error.ts";
@@ -14,7 +14,7 @@ import { AppError } from "../src/errors/app-error.ts";
 let client, db;
 before(async () => {
     client = new PGlite();
-    for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql", "0004_tiktok_account_settings.sql"]) {
+    for (const name of ["0000_initial.sql", "0001_question_credits.sql", "0002_tiktok_live_listener.sql", "0003_restore_next.sql", "0004_tiktok_account_settings.sql", "0007_tiktok_activity_catalog.sql", "0008_tiktok_gift_log.sql"]) {
         const sql = await readFile(new URL(`../../../packages/db/migrations/${name}`, import.meta.url), "utf8");
         // PGlite provides gen_random_uuid natively; pgcrypto is not bundled.
         await client.exec(sql.replace("CREATE EXTENSION IF NOT EXISTS pgcrypto;", ""));
@@ -79,6 +79,10 @@ test("room boundaries, expired credits, malformed comments and disabled gifts do
     assert.equal((await processTikTokEvent(db, { ...chat("bad", "6"), comment: "สวัสดี" }, 10)).disposition, "ignored_invalid_question");
     const unknown = gift("unknown", "6"); unknown.gift.giftId = "unknown"; unknown.gift.giftName = "Unknown";
     assert.equal((await processTikTokEvent(db, unknown, 10)).disposition, "ignored_gift");
+    const activity = await getTikTokActivity(db, "host");
+    assert.ok(activity.comments.some(comment => comment.comment === "สวัสดี"));
+    assert.ok(activity.gifts.some(item => item.giftId === "unknown" && item.giftName === "Unknown"));
+    assert.ok(activity.recentGifts.some(item => item.giftId === "unknown" && item.giftName === "Unknown"));
 });
 
 test("named gift rules work and ending a stream removes waiting items", async () => {
@@ -101,6 +105,7 @@ test("dashboard control validates usernames, requires a live worker and isolates
     const connected = (await post("/api/tiktok/connect", { username: " @HOST " })).json().data;
     assert.equal(connected.username, "host");
     assert.equal(connected.tiktokStatus, "CONNECTING");
+    assert.equal((await app.inject("/api/tiktok/activity")).statusCode, 200);
     await reportListenerStatus(db, { instanceId: connected.revision, liveUsername: "host", status: "ONLINE", tiktokStatus: "CONNECTED", authenticationStatus: "missing", roomId: "active-room", startedAt: Date.now() });
     assert.equal((await app.inject("/api/tiktok/connection")).json().data.tiktokStatus, "CONNECTED");
     const switched = (await post("/api/tiktok/connect", { username: "second" })).json().data;
